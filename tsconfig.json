@@ -35,7 +35,7 @@
     ".next/types/**/*.ts",
     "**/*.ts",
     "**/*.tsx"
-, "prisma.config.ts"  ],
+, "prisma.config.ts", "app/(main)/dashboard/_components/InterviewCardSkeleton.tsx"  ],
   "exclude": [
     "node_modules"
   ]

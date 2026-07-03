@@ -1,7 +1,7 @@
 "use client";
 import React, { useContext, useEffect, useState } from "react";
 import Image from "next/image";
-import { Clock, Info, Loader2Icon, Video, User, Mail, Briefcase } from "lucide-react";
+import { Clock, Info, Loader2Icon, Video, User, Mail, Briefcase, MonitorSmartphone } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useParams, useRouter } from "next/navigation";
@@ -15,11 +15,27 @@ function Interview() {
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [FormLoading, setFormLoading] = useState(false)
+  const [isMobile, setIsMobile] = useState(false);
+  const [checkedDevice, setCheckedDevice] = useState(false);
 
   const { setInterviewInfo } = useContext(InterviewDataContext);
   const router = useRouter();
 
-  // Updated to use Fetch API with your Prisma Backend
+  // Detect mobile/tablet devices
+  useEffect(() => {
+    const checkDevice = () => {
+      const ua = navigator.userAgent;
+      const isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const isSmallScreen = window.innerWidth < 1024; // covers tablets too
+      setIsMobile(isMobileUA || isSmallScreen);
+      setCheckedDevice(true);
+    };
+
+    checkDevice();
+    window.addEventListener("resize", checkDevice);
+    return () => window.removeEventListener("resize", checkDevice);
+  }, []);
+
   const GetInterviewDetail = async () => {
     setLoading(true);
     try {
@@ -55,7 +71,6 @@ function Interview() {
     }
 
     try {
-      // We already have the detail, so we just pass it to context and move on
       setInterviewInfo({
         userName: userName,
         userEmail: userEmail,
@@ -67,8 +82,34 @@ function Interview() {
       setFormLoading(false)
       toast.error("An error occurred. Please try again.");
     }
-
   };
+
+  // Avoid flashing the wrong screen before we've checked device type
+  if (!checkedDevice) {
+    return null;
+  }
+
+  if (isMobile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border border-blue-100">
+          <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+            <MonitorSmartphone className="w-8 h-8 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-3">
+            Please Use a Desktop Device
+          </h2>
+          <p className="text-gray-500 mb-6">
+            This interview requires a desktop or laptop computer for the best experience,
+            including camera and microphone access. Please open this link on a desktop device to continue.
+          </p>
+          <p className="text-xs text-gray-400">
+            If you believe this is an error, try switching to desktop mode in your browser.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
