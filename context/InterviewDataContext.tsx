@@ -1,13 +1,27 @@
-import { createContext } from "react";
+import { createContext, Dispatch, SetStateAction } from "react";
 
-interface InterviewData {
-  id?: string;
+// ─── Type Definitions ───
+export interface InterviewData {
   jobPosition?: string;
-  jobDescription?: string;
   duration?: string | number;
   interviewLink?: string;
   questions?: any;
-  candidates?: any[];
+  [key: string]: any;
 }
 
-export const InterviewDataContext = createContext<InterviewData | null>(null);
+export interface InterviewInfo {
+  userName: string;
+  userEmail: string;
+  interviewData: InterviewData;
+}
+
+interface InterviewContextType {
+  interviewInfo: InterviewInfo | undefined;
+  setInterviewInfo: Dispatch<SetStateAction<InterviewInfo | undefined>>;
+}
+
+// ─── Create Context ───
+export const InterviewDataContext = createContext<InterviewContextType>({
+  interviewInfo: undefined,
+  setInterviewInfo: () => {},
+});

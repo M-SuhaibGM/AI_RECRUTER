@@ -3,7 +3,29 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, ArrowRight, Clock, Mail, Star, Sparkles } from "lucide-react";
 
-const STYLES = `
+// ─── Type Definitions ───
+interface ConfettiPiece {
+  id: number;
+  color: string;
+  left: string;
+  delay: string;
+  size: number;
+}
+
+interface Step {
+  icon: React.ReactNode;
+  label: string;
+  bg: string;
+  color: string;
+  cls: string;
+}
+
+interface ConfettiProps {
+  pieces: ConfettiPiece[];
+}
+
+// ─── Styles ───
+const STYLES: string = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap');
 
   @keyframes page-in {
@@ -56,6 +78,10 @@ const STYLES = `
     0%,100% { box-shadow: 0 0 8px rgba(52,211,153,.3); }
     50%     { box-shadow: 0 0 20px rgba(52,211,153,.6); }
   }
+  @keyframes score-count-up {
+    from { opacity:0; transform:translateY(10px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
 
   .page-in    { animation: page-in .7s cubic-bezier(.16,1,.3,1) both; }
   .check-pop  { animation: check-pop .6s cubic-bezier(.34,1.56,.64,1) .3s both; }
@@ -81,6 +107,7 @@ const STYLES = `
   }
 
   .progress-bar { animation: progress-fill 1.8s cubic-bezier(.16,1,.3,1) .6s both; }
+  .score-anim { animation: score-count-up .6s ease-out .8s both; }
 
   .confetti-piece {
     position: absolute;
@@ -98,31 +125,10 @@ const STYLES = `
   .card-scroll { scrollbar-width: none; }
 `;
 
-const CONFETTI_COLORS = ["#60a5fa", "#a78bfa", "#34d399", "#f472b6", "#fbbf24"];
+// ─── Constants ───
+const CONFETTI_COLORS: string[] = ["#60a5fa", "#a78bfa", "#34d399", "#f472b6", "#fbbf24"];
 
-// ✅ Receives pre-generated pieces — no Math.random() during render = no hydration error
-function Confetti({ pieces }) {
-  return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-50">
-      {pieces.map((p) => (
-        <div
-          key={p.id}
-          className="confetti-piece"
-          style={{
-            left: p.left,
-            top: "-10px",
-            width: p.size,
-            height: p.size,
-            background: p.color,
-            animationDelay: p.delay,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-const STEPS = [
+const STEPS: Step[] = [
   {
     icon: <Mail className="w-3.5 h-3.5" />,
     label: "Feedback report sent to your email",
@@ -146,29 +152,54 @@ const STEPS = [
   },
 ];
 
-export default function CompletedPage() {
-  // ✅ null on SSR, populated only after mount — prevents hydration mismatch
-  const [confettiPieces, setConfettiPieces] = useState(null);
+// ─── Confetti Component ───
+function Confetti({ pieces }: ConfettiProps): React.ReactElement {
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden z-50">
+      {pieces.map((p: ConfettiPiece) => (
+        <div
+          key={p.id}
+          className="confetti-piece"
+          style={{
+            left: p.left,
+            top: "-10px",
+            width: `${p.size}px`,
+            height: `${p.size}px`,
+            background: p.color,
+            animationDelay: p.delay,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Component ───
+export default function CompletedPage(): React.ReactElement {
+  const [confettiPieces, setConfettiPieces] = useState<ConfettiPiece[] | null>(null);
+  const [showScore, setShowScore] = useState<boolean>(false);
 
   useEffect(() => {
-    // ✅ Math.random() runs client-side only
-    const pieces = Array.from({ length: 24 }, (_, i) => ({
+    // Generate confetti pieces client-side only
+    const pieces: ConfettiPiece[] = Array.from({ length: 24 }, (_, i: number) => ({
       id: i,
       color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
       left: `${5 + Math.random() * 90}%`,
       delay: `${Math.random() * 0.9}s`,
       size: Math.round(4 + Math.random() * 7),
     }));
+    
     setConfettiPieces(pieces);
-    const t = setTimeout(() => setConfettiPieces(null), 2800);
-    return () => clearTimeout(t);
+    setShowScore(true);
+    
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => setConfettiPieces(null), 2800);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
     <>
       <style>{STYLES}</style>
 
-      {/* ✅ h-screen + overflow-hidden = exactly 100vh, nothing bleeds out */}
       <div
         className="h-screen overflow-hidden flex items-center justify-center px-4 relative"
         style={{ background: "#020817", fontFamily: "'DM Sans', sans-serif" }}
@@ -199,40 +230,35 @@ export default function CompletedPage() {
           <div
             className="dot-pulse absolute inset-0"
             style={{
-              backgroundImage:
-                "radial-gradient(circle, rgba(148,163,184,.5) 1px, transparent 1px)",
+              backgroundImage: "radial-gradient(circle, rgba(148,163,184,.5) 1px, transparent 1px)",
               backgroundSize: "40px 40px",
             }}
           />
         </div>
 
-        {/* ── Confetti — renders only after useEffect (client only) ── */}
+        {/* ── Confetti ── */}
         {confettiPieces && <Confetti pieces={confettiPieces} />}
 
         {/* ── Card ── */}
         <div className="page-in relative w-full max-w-md">
-          {/* outer glow */}
           <div
             className="absolute inset-0 rounded-3xl -z-10 blur-2xl"
             style={{ background: "rgba(16,185,129,.08)", transform: "scale(1.1)" }}
           />
 
-          {/* ✅ card scrolls internally on short screens — outer wrapper never scrolls */}
           <div
             className="card-scroll relative rounded-3xl overflow-hidden glass-dark"
             style={{ maxHeight: "calc(100vh - 2rem)", overflowY: "auto" }}
           >
-            {/* top accent */}
+            {/* Top accent */}
             <div
               className="h-px w-full"
               style={{
-                background:
-                  "linear-gradient(90deg, transparent, #10b981 40%, #34d399 60%, transparent)",
+                background: "linear-gradient(90deg, transparent, #10b981 40%, #34d399 60%, transparent)",
               }}
             />
 
             <div className="p-7 flex flex-col items-center gap-5">
-
               {/* ── Check icon + pulse rings ── */}
               <div className="relative flex items-center justify-center mt-1">
                 <div
@@ -247,8 +273,7 @@ export default function CompletedPage() {
                   className="check-pop relative w-20 h-20 rounded-full flex items-center justify-center"
                   style={{
                     background: "linear-gradient(135deg, #064e3b, #10b981)",
-                    boxShadow:
-                      "0 0 48px rgba(16,185,129,.4), inset 0 1px 0 rgba(255,255,255,.18)",
+                    boxShadow: "0 0 48px rgba(16,185,129,.4), inset 0 1px 0 rgba(255,255,255,.18)",
                   }}
                 >
                   <CheckCircle2 className="w-9 h-9 text-white" />
@@ -295,7 +320,6 @@ export default function CompletedPage() {
                   <span className="text-blue-400 font-semibold">AIcruiter</span>.
                 </p>
               </div>
-
               {/* ── Completion bar ── */}
               <div
                 className="w-full rounded-2xl p-4 space-y-2"
@@ -337,7 +361,7 @@ export default function CompletedPage() {
                 <p className="text-[9px] uppercase tracking-[.22em] text-slate-500 font-bold">
                   What Happens Next
                 </p>
-                {STEPS.map((step, i) => (
+                {STEPS.map((step: Step, i: number) => (
                   <div
                     key={i}
                     className={`${step.cls} flex items-center gap-3 p-3 rounded-xl`}
@@ -390,12 +414,11 @@ export default function CompletedPage() {
               </Link>
             </div>
 
-            {/* bottom accent */}
+            {/* Bottom accent */}
             <div
               className="h-px w-full"
               style={{
-                background:
-                  "linear-gradient(90deg, transparent, rgba(16,185,129,.25) 50%, transparent)",
+                background: "linear-gradient(90deg, transparent, rgba(16,185,129,.25) 50%, transparent)",
               }}
             />
           </div>

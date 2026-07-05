@@ -33,7 +33,6 @@ interface ErrorResponse {
 // ─── Helper Functions ───
 function logFetchEvent(event: string, details: Record<string, any>): void {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] 📋 ${event}:`, JSON.stringify(details, null, 2));
 }
 
 function sanitizeInterviewLink(link: string): string {

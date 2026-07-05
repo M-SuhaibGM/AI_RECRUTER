@@ -1,6 +1,6 @@
 "use client";
-import React, { useContext, useEffect, useRef, useState, useMemo } from "react";
-import { InterviewDataContext } from "@/context/InterviewDataContext";
+import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { InterviewDataContext, InterviewInfo } from "@/context/InterviewDataContext";
 import Vapi from "@vapi-ai/web";
 import { toast } from "sonner";
 import axios from "axios";
@@ -12,46 +12,86 @@ import { Bot, Clock, Shield } from "lucide-react";
 import { STYLES } from "@/services/Constants";
 import { useAntiCheat } from "@/hooks/useAntiCheat";
 
-function StartInterview() {
+// ─── Type Definitions ───
+interface Question {
+  question: string;
+  answer?: string;
+  type?: string;
+}
+interface UserConfig {
+  language: string;
+  voiceId: string;
+  voiceProvider: string;
+}
+
+interface VapiMessage {
+  conversation?: any;
+  [key: string]: any;
+}
+
+interface VapiError {
+  error?: {
+    type?: string;
+    msg?: string;
+  };
+  errorMsg?: string;
+  type?: string;
+}
+
+interface ConversationMessage {
+  role: string;
+  content?: string;
+  message?: string;
+}
+
+// ─── Constants ───
+const VALID_VOICES: string[] = [
+  "Clara", "Godfrey", "Layla", "Sid", "Gustavo", "Elliot", "Kylie", "Rohan",
+  "Lily", "Savannah", "Hana", "Neha", "Cole", "Harry", "Paige", "Spencer",
+  "Nico", "Kai", "Emma", "Sagar", "Neil", "Naina", "Leah", "Tara", "Jess",
+  "Leo", "Dan", "Mia", "Zac", "Zoe",
+];
+
+// ─── Main Component ───
+function StartInterview(): React.ReactElement {
   const { interviewInfo } = useContext(InterviewDataContext);
-  const { interview_id } = useParams();
+  const { interview_id } = useParams<{ interview_id: string }>();
   const router = useRouter();
 
   /* ───────────────────────── REFS ───────────────────────── */
-  const vapiRef = useRef(null);
-  const currentQuestionIndexRef = useRef(0);
-  const progressPercentageRef = useRef(0);
-  const conversationRef = useRef(null);
-  const feedbackCalledRef = useRef(false);
-  const isCallActiveRef = useRef(false);
-  const initStartedRef = useRef(false);
-  const timerRef = useRef(null);
-  const isMountedRef = useRef(true);
-  const hasGreetedRef = useRef(false);
-
-  // ✅ NEW REFS: Track anti-cheat metrics to bypass stale hook closure states
-  const tabSwitchCountRef = useRef(0);
-  const switchTimestampsRef = useRef([]);
+  const vapiRef = useRef<any>(null);
+  const currentQuestionIndexRef = useRef<number>(0);
+  const progressPercentageRef = useRef<number>(0);
+  const conversationRef = useRef<string | null>(null);
+  const feedbackCalledRef = useRef<boolean>(false);
+  const isCallActiveRef = useRef<boolean>(false);
+  const initStartedRef = useRef<boolean>(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const hasGreetedRef = useRef<boolean>(false);
+  const tabSwitchCountRef = useRef<number>(0);
+  const switchTimestampsRef = useRef<string[]>([]);
 
   /* ───────────────────────── STATE ───────────────────────── */
-  const [activeUser, setActiveUser] = useState(false);
-  const [conversation, setConversation] = useState();
-  const [hasInterviewStarted, setHasInterviewStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [startTimer, setStartTimer] = useState(false);
-  const [resetTimer, setResetTimer] = useState(false);
-  const [config, setConfig] = useState({ language: "en-US", voiceId: "Elliot", voiceProvider: "vapi" });
-  const [isConfigLoaded, setIsConfigLoaded] = useState(false);
-  const [isMicChecked, setIsMicChecked] = useState(false);
-  const [volume, setVolume] = useState(0);
-  const [elapsedSecs, setElapsedSecs] = useState(0);
-  const [candidateId, setCandidateId] = useState(null);
-  const [dbTabSwitches, setDbTabSwitches] = useState(0);
-
-  const { tabSwitchCount, switchTimestamps } = useAntiCheat(activeUser, candidateId, dbTabSwitches);
+  const [activeUser, setActiveUser] = useState<boolean>(false);
+  const [conversation, setConversation] = useState<string | undefined>();
+  const [hasInterviewStarted, setHasInterviewStarted] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [startTimer, setStartTimer] = useState<boolean>(false);
+  const [resetTimer, setResetTimer] = useState<boolean>(false);
+  const [config, setConfig] = useState<UserConfig>({
+    language: "en-US",
+    voiceId: "Elliot",
+    voiceProvider: "vapi",
+  });
+  const [isConfigLoaded, setIsConfigLoaded] = useState<boolean>(false);
+  const [isMicChecked, setIsMicChecked] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(0);
+  const [elapsedSecs, setElapsedSecs] = useState<number>(0);
+  const { tabSwitchCount, switchTimestamps } = useAntiCheat(activeUser, "", 0);
+  const totalQuestions: number = interviewInfo?.interviewData?.questions?.length || 5;
 
   /* ───────────────────────── Keep Anti-Cheat Refs Synced ───────────────────────── */
-  // ✅ Keeps live anti-cheat data updated in real-time accessible to Vapi event loops
   useEffect(() => {
     tabSwitchCountRef.current = tabSwitchCount;
     switchTimestampsRef.current = switchTimestamps;
@@ -65,87 +105,63 @@ function StartInterview() {
     };
   }, []);
 
-  /* ───────────────────────── Initialize candidate record ───────────────────────── */
-  useEffect(() => {
-    if (!interviewInfo?.userEmail || !interview_id) return;
-
-    const initCandidate = async () => {
-      try {
-        const res = await axios.post("/api/interview-feedback/init", {
-          interviewId: interview_id,
-          userName: interviewInfo.userName,
-          userEmail: interviewInfo.userEmail,
-        });
-        if (res.data?.success && isMountedRef.current) {
-          setCandidateId(res.data.candidateId);
-          setDbTabSwitches(res.data.tabSwitches || 0);
-        }
-      } catch (err) {
-        console.error("Error initializing candidate details:", err);
-      }
-    };
-
-    initCandidate();
-  }, [interviewInfo, interview_id]);
-
   /* ───────────────────────── Elapsed timer (header) ───────────────────────── */
   useEffect(() => {
     if (activeUser) {
       timerRef.current = setInterval(() => {
-        if (isMountedRef.current) setElapsedSecs(s => s + 1);
+        if (isMountedRef.current) setElapsedSecs((s: number) => s + 1);
       }, 1000);
     } else {
-      clearInterval(timerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     }
-    return () => clearInterval(timerRef.current);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [activeUser]);
 
-  const fmtTime = (s) =>
+  const fmtTime = (s: number): string =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
   /* ───────────────────────── Fetch user config ───────────────────────── */
   useEffect(() => {
-    const VALID = [
-      "Clara", "Godfrey", "Layla", "Sid", "Gustavo", "Elliot", "Kylie", "Rohan",
-      "Lily", "Savannah", "Hana", "Neha", "Cole", "Harry", "Paige", "Spencer",
-      "Nico", "Kai", "Emma", "Sagar", "Neil", "Naina", "Leah", "Tara", "Jess",
-      "Leo", "Dan", "Mia", "Zac", "Zoe",
-    ];
     axios.get("/api/user-config")
-      .then(res => {
+      .then((res: any) => {
         if (res.data && isMountedRef.current) {
           setConfig({
             language: res.data.language || "en-US",
-            voiceId: VALID.includes(res.data.voiceId) ? res.data.voiceId : "Elliot",
+            voiceId: VALID_VOICES.includes(res.data.voiceId) ? res.data.voiceId : "Elliot",
             voiceProvider: "vapi",
           });
         }
       })
       .catch(() => { })
-      .finally(() => { if (isMountedRef.current) setIsConfigLoaded(true); });
+      .finally(() => {
+        if (isMountedRef.current) setIsConfigLoaded(true);
+      });
   }, []);
 
-  const totalQuestions = interviewInfo?.interviewData?.questions?.length || 5;
-
   /* ───────────────────────── Question index — deduped ───────────────────────── */
-  const currentQuestionIndex = useMemo(() => {
+  const currentQuestionIndex: number = useMemo(() => {
     if (!conversation) return 0;
     try {
-      const logs = JSON.parse(conversation);
-      const assistantTurns = logs.reduce((count, msg, i) => {
-        const isAssistant = msg.role === "assistant" || msg.role === "bot";
-        const prevWasAssistant = i > 0 && (logs[i - 1].role === "assistant" || logs[i - 1].role === "bot");
-        const isSubstantial = (msg.content || msg.message || "").length > 15;
+      const logs: ConversationMessage[] = JSON.parse(conversation);
+      const assistantTurns: number = logs.reduce((count: number, msg: ConversationMessage, i: number) => {
+        const isAssistant: boolean = msg.role === "assistant" || msg.role === "bot";
+        const prevWasAssistant: boolean = i > 0 && (logs[i - 1].role === "assistant" || logs[i - 1].role === "bot");
+        const isSubstantial: boolean = (msg.content || msg.message || "").length > 15;
         if (isAssistant && !prevWasAssistant && isSubstantial) return count + 1;
         return count;
       }, 0);
       return Math.min(assistantTurns, totalQuestions);
-    } catch { return 0; }
+    } catch {
+      return 0;
+    }
   }, [conversation, totalQuestions]);
 
-  const progressPercentage = useMemo(() =>
+  const progressPercentage: number = useMemo(() =>
     Math.round((currentQuestionIndex / totalQuestions) * 100),
-    [currentQuestionIndex, totalQuestions]);
+    [currentQuestionIndex, totalQuestions]
+  );
 
   /* ───────────────────────── Keep refs in sync ───────────────────────── */
   useEffect(() => {
@@ -154,8 +170,104 @@ function StartInterview() {
   }, [currentQuestionIndex, progressPercentage]);
 
   useEffect(() => {
-    conversationRef.current = conversation;
+    conversationRef.current = conversation || null;
   }, [conversation]);
+
+  /* ───────────────────────── GenerateFeedback ───────────────────────── */
+  const GenerateFeedback = useCallback(async (
+    reason: string,
+    progress: number,
+    conv: string | null,
+    tabCount: number,
+    timestamps: string[]
+  ): Promise<void> => {
+    if (feedbackCalledRef.current) return;
+    feedbackCalledRef.current = true;
+
+    if (isMountedRef.current) setLoading(true);
+
+    try {
+      const aiRes = await axios.post("/api/ai-feedback", { conversation: conv });
+      if (aiRes.data?.error) throw new Error(aiRes.data.error);
+
+      const parsed = typeof aiRes.data === "string"
+        ? JSON.parse(aiRes.data.replace(/```json|```/gi, "").trim())
+        : aiRes.data;
+
+      await axios.post("/api/interview-feedback", {
+        userName: interviewInfo?.userName,
+        userEmail: interviewInfo?.userEmail,
+        interviewId: interview_id,
+        feedback: parsed,
+        exitReason: reason,
+        progressAtExit: progress,
+        completionStatus: progress === 100 ? "Success" : "Incomplete",
+        tabSwitches: tabCount,
+        securityFlags: {
+          timestamps: timestamps,
+          browser: typeof navigator !== "undefined" ? navigator.userAgent : "",
+          platform: typeof navigator !== "undefined" ? navigator.platform : "",
+        },
+      });
+
+      if (isMountedRef.current) {
+        router.replace(`/interview/${interview_id}/completed`);
+      }
+    } catch (err: unknown) {
+      if (isMountedRef.current) {
+        toast.error("Feedback error — redirecting…");
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            router.replace(`/interview/${interview_id}/completed`);
+          }
+        }, 2000);
+      }
+    } finally {
+      if (isMountedRef.current) setLoading(false);
+    }
+  }, [interviewInfo, interview_id, router]);
+
+  /* ───────────────────────── startCall ───────────────────────── */
+  const startCall = useCallback((vapiInstance: any): void => {
+    const langMap: Record<string, string> = { "en-US": "en-US", "hi-IN": "hi", "ur-PK": "multi" };
+    const sysLang: Record<string, string> = {
+      "en-US": "English",
+      "hi-IN": "Hindi (हिंदी). Always respond in Hindi script.",
+      "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
+    };
+
+    const ql: string = interviewInfo?.interviewData?.questions
+      ?.map((q: Question, i: number) => `${i + 1}. ${q.question}`)
+      .join("\n") || "";
+
+    let welcome: string = `Hi ${interviewInfo?.userName}! Ready to start?`;
+    if (config.language.startsWith("hi"))
+      welcome = `नमस्ते ${interviewInfo?.userName}! क्या आप साक्षात्कार शुरू करने के लिए तैयार हैं?`;
+    if (config.language.startsWith("ur"))
+      welcome = `اسلام و علیکم ${interviewInfo?.userName}! کیا آپ انٹرویو کے لیے تیار ہیں؟`;
+
+    vapiInstance.start({
+      name: "AI Recruiter",
+      firstMessage: welcome,
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: langMap[config.language] || "en-US",
+      },
+      voice: {
+        provider: "vapi",
+        voiceId: VALID_VOICES.includes(config.voiceId) ? config.voiceId : "Elliot",
+      },
+      model: {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        messages: [{
+          role: "system",
+          content: `You are an AI recruiter. Conduct the interview in ${sysLang[config.language] || "English"}. Ask these questions one by one:\n${ql}\nAsk one question, then stay completely silent and wait for the candidate to fully respond. Do not interrupt or move to the next question until the candidate has clearly finished their answer.`,
+        }],
+      },
+    });
+  }, [interviewInfo, config]);
 
   /* ───────────────────────── Vapi setup ───────────────────────── */
   useEffect(() => {
@@ -163,7 +275,7 @@ function StartInterview() {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
 
-    const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY);
+    const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY as string);
     vapiRef.current = vapi;
 
     vapi.on("call-start", () => {
@@ -189,13 +301,13 @@ function StartInterview() {
       }
     });
 
-    vapi.on("volume-level", (l) => {
+    vapi.on("volume-level", (l: number) => {
       if (isMountedRef.current) setVolume(l);
     });
 
-    vapi.on("message", (msg) => {
+    vapi.on("message", (msg: VapiMessage) => {
       if (msg?.conversation) {
-        const c = JSON.stringify(msg.conversation);
+        const c: string = JSON.stringify(msg.conversation);
         conversationRef.current = c;
         if (isMountedRef.current) setConversation(c);
       }
@@ -205,23 +317,21 @@ function StartInterview() {
       isCallActiveRef.current = false;
       if (isMountedRef.current) setActiveUser(false);
 
-      const latestIndex = currentQuestionIndexRef.current;
-      const latestProgress = progressPercentageRef.current;
-      const latestConv = conversationRef.current;
-      const latestTabCount = tabSwitchCountRef.current;
-      const latestTimestamps = switchTimestampsRef.current;
+      const latestIndex: number = currentQuestionIndexRef.current;
+      const latestProgress: number = progressPercentageRef.current;
+      const latestConv: string | null = conversationRef.current;
+      const latestTabCount: number = tabSwitchCountRef.current;
+      const latestTimestamps: string[] = switchTimestampsRef.current;
 
-      const reason = latestIndex >= totalQuestions
+      const reason: string = latestIndex >= totalQuestions
         ? "Interview Completed Normally"
         : "User Ended Early";
 
-      // Execute directly — let the function internally handle the lock
       GenerateFeedback(reason, latestProgress, latestConv, latestTabCount, latestTimestamps);
     });
 
-    vapi.on("error", (err) => {
-      console.log("❌ [Vapi] error:", err);
-      const isNormalEnd =
+    vapi.on("error", (err: VapiError) => {
+      const isNormalEnd: boolean =
         err?.error?.type === "ejected" ||
         err?.error?.msg === "Meeting has ended" ||
         err?.errorMsg === "Meeting has ended" ||
@@ -247,112 +357,7 @@ function StartInterview() {
         isCallActiveRef.current = false;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interviewInfo, isMicChecked, isConfigLoaded]);
-
-  /* ───────────────────────── startCall ───────────────────────── */
-  const startCall = (vapiInstance) => {
-    const VALID = [
-      "Clara", "Godfrey", "Layla", "Sid", "Gustavo", "Elliot", "Kylie", "Rohan",
-      "Lily", "Savannah", "Hana", "Neha", "Cole", "Harry", "Paige", "Spencer",
-      "Nico", "Kai", "Emma", "Sagar", "Neil", "Naina", "Leah", "Tara", "Jess",
-      "Leo", "Dan", "Mia", "Zac", "Zoe",
-    ];
-    const langMap = { "en-US": "en-US", "hi-IN": "hi", "ur-PK": "multi" };
-    const sysLang = {
-      "en-US": "English",
-      "hi-IN": "Hindi (हिंदी). Always respond in Hindi script.",
-      "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
-    };
-
-    const ql = interviewInfo?.interviewData?.questions
-      .map((q, i) => `${i + 1}. ${q.question}`)
-      .join("\n");
-
-    let welcome = `Hi ${interviewInfo?.userName}! Ready to start?`;
-    if (config.language.startsWith("hi"))
-      welcome = `नमस्ते ${interviewInfo?.userName}! क्या आप साक्षात्कार शुरू करने के लिए तैयार हैं?`;
-    if (config.language.startsWith("ur"))
-      welcome = `اسلام و علیکم ${interviewInfo?.userName}! کیا آپ انٹرویو کے لیے تیار ہیں؟`;
-
-    vapiInstance.start({
-      name: "AI Recruiter",
-      firstMessage: welcome,
-      transcriber: {
-        provider: "deepgram",
-        model: "nova-2",
-        language: langMap[config.language] || "en-US",
-      },
-      voice: {
-        provider: "vapi",
-        voiceId: VALID.includes(config.voiceId) ? config.voiceId : "Elliot",
-      },
-      model: {
-        provider: "openai",
-        model: "gpt-4o-mini",
-        messages: [{
-          role: "system",
-          content: `You are an AI recruiter. Conduct the interview in ${sysLang[config.language] || "English"}. Ask these questions one by one:\n${ql}\nAsk one question, then stay completely silent and wait for the candidate to fully respond. Do not interrupt or move to the next question until the candidate has clearly finished their answer.`,
-        }],
-      },
-    });
-  };
-
-  /* ───────────────────────── GenerateFeedback ───────────────────────── */
-  /* ───────────────────────── GenerateFeedback ───────────────────────── */
-  const GenerateFeedback = async (reason, progress, conv, tabCount, timestamps) => {
-    // 🛑 CRITICAL FIX: Guard clause using the Ref immediately before any async operations
-    if (feedbackCalledRef.current) return;
-    feedbackCalledRef.current = true; // Synchronously lock entry
-
-    if (isMountedRef.current) setLoading(true);
-
-    try {
-      const aiRes = await axios.post("/api/ai-feedback", { conversation: conv });
-      if (aiRes.data?.error) throw new Error(aiRes.data.error);
-
-      const parsed = typeof aiRes.data === "string"
-        ? JSON.parse(aiRes.data.replace(/```json|```/gi, "").trim())
-        : aiRes.data;
-
-      // ✅ EXPLICIT AWAIT: Blocks redirection until database successfully completes mutation
-      await axios.post("/api/interview-feedback", {
-        userName: interviewInfo?.userName,
-        userEmail: interviewInfo?.userEmail,
-        interviewId: interview_id,
-        feedback: parsed,
-        exitReason: reason,
-        progressAtExit: progress,
-        completionStatus: progress === 100 ? "Success" : "Incomplete",
-        tabSwitches: tabCount,
-        securityFlags: {
-          timestamps: timestamps,
-          browser: typeof navigator !== "undefined" ? navigator.userAgent : "",
-          platform: typeof navigator !== "undefined" ? navigator.platform : "",
-        },
-      });
-
-      if (isMountedRef.current) {
-        router.replace(`/interview/${interview_id}/completed`);
-      }
-    } catch (err) {
-      console.error("GenerateFeedback error:", err);
-
-      // Reset lock only if you want to allow a retry on absolute failure
-      // feedbackCalledRef.current = false; 
-
-      if (isMountedRef.current) {
-        toast.error("Feedback error — redirecting…");
-        setTimeout(() => {
-          if (isMountedRef.current) {
-            router.replace(`/interview/${interview_id}/completed`);
-          }
-        }, 2000);
-      }
-    } finally {
-      if (isMountedRef.current) setLoading(false);
-    }
-  };
+  }, [interviewInfo, isMicChecked, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
 
   /* ─────────────────────────── RENDER ─────────────────────── */
   return (
@@ -384,7 +389,7 @@ function StartInterview() {
               backgroundSize: "40px 40px",
             }}
           />
-          {[...Array(6)].map((_, i) => (
+          {[...Array(6)].map((_, i: number) => (
             <div
               key={i}
               className="absolute left-0 right-0 h-px"
@@ -425,7 +430,7 @@ function StartInterview() {
             <div className="hidden md:flex items-center gap-2">
               <span className="text-[10px] text-slate-400 uppercase tracking-widest">Question</span>
               <div className="flex items-center gap-1">
-                {Array.from({ length: totalQuestions }).map((_, i) => (
+                {Array.from({ length: totalQuestions }).map((_, i: number) => (
                   <div
                     key={i}
                     className="h-1.5 w-6 rounded-full transition-all duration-500"

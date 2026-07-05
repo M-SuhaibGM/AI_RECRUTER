@@ -1,4 +1,4 @@
-// Inside your AlertConfirmation component
+import React, { ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,30 +9,35 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
 
-function AlertConfirmation({ children, stopInterview }) {
+interface AlertConfirmationProps {
+  children: ReactNode;
+  stopInterview: () => void;
+}
+
+function AlertConfirmation({ children, stopInterview }: AlertConfirmationProps): React.ReactElement {
   return (
     <AlertDialog>
-      {/* KEY FIX: Add asChild here */}
       <AlertDialogTrigger asChild>
         {children}
       </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-          <AlertDialogDescription>
+      <AlertDialogContent className={undefined}>
+        <AlertDialogHeader className={undefined}>
+          <AlertDialogTitle className={undefined}>Are you sure?</AlertDialogTitle>
+          <AlertDialogDescription className={undefined}>
             This will end the interview session and generate your feedback.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogFooter className={undefined}>
+          <AlertDialogCancel className={undefined}>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={stopInterview} className="bg-red-500 hover:bg-red-600">
             End Interview
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  )
+  );
 }
+
 export default AlertConfirmation;

@@ -1,5 +1,5 @@
 "use client";
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useState, ChangeEvent } from "react";
 import Image from "next/image";
 import { Clock, Info, Loader2Icon, Video, User, Mail, Briefcase, MonitorSmartphone } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -8,25 +8,41 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { InterviewDataContext } from "@/context/InterviewDataContext";
 
-function Interview() {
-  const { interview_id } = useParams();
-  const [interviewData, setInterviewData] = useState();
-  const [userName, setUserName] = useState("");
-  const [userEmail, setUserEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [FormLoading, setFormLoading] = useState(false)
-  const [isMobile, setIsMobile] = useState(false);
-  const [checkedDevice, setCheckedDevice] = useState(false);
+// ─── Type Definitions ───
+interface InterviewData {
+  jobPosition?: string;
+  duration?: string | number;
+  interviewLink?: string;
+  questions?: any;
+  [key: string]: any;
+}
+
+interface InterviewInfo {
+  userName: string;
+  userEmail: string;
+  interviewData: InterviewData;
+}
+
+// ─── Main Component ───
+function Interview(): React.ReactElement | null {
+  const { interview_id } = useParams<{ interview_id: string }>();
+  const [interviewData, setInterviewData] = useState<InterviewData | undefined>();
+  const [userName, setUserName] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [FormLoading, setFormLoading] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [checkedDevice, setCheckedDevice] = useState<boolean>(false);
 
   const { setInterviewInfo } = useContext(InterviewDataContext);
   const router = useRouter();
 
-  // Detect mobile/tablet devices
+  // ─── Detect mobile/tablet devices ───
   useEffect(() => {
-    const checkDevice = () => {
-      const ua = navigator.userAgent;
-      const isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-      const isSmallScreen = window.innerWidth < 1024; // covers tablets too
+    const checkDevice = (): void => {
+      const ua: string = navigator.userAgent;
+      const isMobileUA: boolean = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const isSmallScreen: boolean = window.innerWidth < 1024;
       setIsMobile(isMobileUA || isSmallScreen);
       setCheckedDevice(true);
     };
@@ -36,10 +52,11 @@ function Interview() {
     return () => window.removeEventListener("resize", checkDevice);
   }, []);
 
-  const GetInterviewDetail = async () => {
+  // ─── Fetch Interview Details ───
+  const GetInterviewDetail = async (): Promise<void> => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/interviews/details/${interview_id}`);
+      const response: Response = await fetch(`/api/interviews/details/${interview_id}`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -48,7 +65,7 @@ function Interview() {
       }
 
       setInterviewData(data);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(error);
       toast.error("Error fetching interview details");
     } finally {
@@ -60,35 +77,39 @@ function Interview() {
     if (interview_id) GetInterviewDetail();
   }, [interview_id]);
 
-  const onJoinInterview = async () => {
-    setFormLoading(true)
+  // ─── Join Interview ───
+  const onJoinInterview = async (): Promise<void> => {
+    setFormLoading(true);
+    
     if (!userName.trim() || !userEmail.trim()) {
       toast.warning("Missing Information", {
         description: "Please enter both your name and email to continue.",
       });
-      setFormLoading(false)
+      setFormLoading(false);
       return;
     }
 
     try {
-      setInterviewInfo({
+      const interviewInfo: InterviewInfo = {
         userName: userName,
         userEmail: userEmail,
-        interviewData: interviewData,
-      });
+        interviewData: interviewData as InterviewData,
+      };
 
+      setInterviewInfo(interviewInfo);
       router.push(`/interview/${interview_id}/start`);
-    } catch (error) {
-      setFormLoading(false)
+    } catch (error: unknown) {
+      setFormLoading(false);
       toast.error("An error occurred. Please try again.");
     }
   };
 
-  // Avoid flashing the wrong screen before we've checked device type
+  // ─── Loading State ───
   if (!checkedDevice) {
     return null;
   }
 
+  // ─── Mobile Warning ───
   if (isMobile) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
@@ -111,6 +132,7 @@ function Interview() {
     );
   }
 
+  // ─── Main Render ───
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl overflow-hidden max-w-4xl w-full flex flex-col md:flex-row border border-blue-100">
@@ -172,8 +194,7 @@ function Interview() {
               <Input
                 placeholder="John Doe"
                 className="h-12 border-gray-200"
-                onChange={(e) => setUserName(e.target.value)}
-              />
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setUserName(e.target.value)} type={undefined}              />
             </div>
 
             <div className="space-y-2">
@@ -184,7 +205,7 @@ function Interview() {
                 type="email"
                 placeholder="john@example.com"
                 className="h-12 border-gray-200"
-                onChange={(e) => setUserEmail(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setUserEmail(e.target.value)}
               />
             </div>
 
