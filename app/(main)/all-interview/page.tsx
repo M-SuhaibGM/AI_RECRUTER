@@ -139,7 +139,7 @@ function AllInterview(): React.ReactElement {
   return (
     <div 
       className="bg-white border rounded-[30px] shadow-sm overflow-hidden flex flex-col"
-      style={{ height: '72vh' }}
+      style={{ height: '80vh' }}
     >
       {/* Table Header Section */}
       <div className="p-6 border-b bg-white shrink-0">

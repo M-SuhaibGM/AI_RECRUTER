@@ -1,9 +1,12 @@
 "use client";
-import { ArrowRight, CreditCard, Check, Zap, ShieldCheck, Trophy, LucideIcon } from "lucide-react";
-import React, { useEffect, useState, useCallback } from "react";
+import { CreditCard, Check, Zap, ShieldCheck, Trophy, LucideIcon } from "lucide-react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import PayButton from "./_components/PayButton";
 import { useSession } from "next-auth/react";
 import { getUserCredits } from "@/actions/user";
+import { useSearchParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import axios from "axios";
 
 // ─── Type Definitions ───
 interface Plan {
@@ -19,14 +22,13 @@ interface SkeletonCardProps {
   recommended?: boolean;
 }
 
-// ─── Plans Data ───
 const plans: Plan[] = [
   {
     name: "Basic",
     price: "5",
     interviews: 20,
     icon: Zap,
-    features: ["Templates", "Email support", "AI Voice"],
+    features: ["20 Interview Credits", "Email support", "AI Voice"],
   },
   {
     name: "Standard",
@@ -34,18 +36,16 @@ const plans: Plan[] = [
     interviews: 50,
     icon: ShieldCheck,
     recommended: true,
-    features: ["All templates", "Priority support", "Analytics", "Custom Links"],
+    features: ["50 Interview Credits", "Priority support", "Analytics", "Custom Links"],
   },
   {
     name: "Pro",
     price: "25",
     interviews: 120,
     icon: Trophy,
-    features: ["Unlimited", "24/7 support", "Advanced Analytics", "Teams"],
+    features: ["120 Interview Credits", "24/7 support", "Advanced Analytics", "Teams"],
   },
 ];
-
-// ─── Skeleton Components ───
 
 function SkeletonCard({ recommended }: SkeletonCardProps): React.ReactElement {
   return (
@@ -57,21 +57,15 @@ function SkeletonCard({ recommended }: SkeletonCardProps): React.ReactElement {
           Popular
         </div>
       )}
-      {/* Icon */}
       <div className="w-8 h-8 rounded-lg bg-slate-200 mb-3 mt-4" />
-      {/* Title */}
       <div className="h-4 w-20 bg-slate-200 rounded mb-2" />
-      {/* Price */}
       <div className="h-7 w-14 bg-slate-200 rounded mb-1.5" />
-      {/* Interviews */}
       <div className="h-3 w-24 bg-blue-100 rounded mb-4" />
-      {/* Features */}
       <div className="flex-1 space-y-2 mb-4">
         {[1, 2, 3].map((i: number) => (
           <div key={i} className="h-3 bg-slate-100 rounded w-full" />
         ))}
       </div>
-      {/* Button */}
       <div className="h-9 w-full bg-slate-200 rounded-xl mt-auto" />
     </div>
   );
@@ -91,14 +85,17 @@ function SkeletonBalance(): React.ReactElement {
   );
 }
 
-// ─── Main Billing Component ───
 function Billing(): React.ReactElement {
-  const { data: session } = useSession();
+  const { data: session, update } = useSession();
   const user = session?.user;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  
   const [credits, setLiveCredits] = useState<number | null>(null);
   const [pageReady, setPageReady] = useState<boolean>(false);
+  const verifyCalledRef = useRef<boolean>(false);
 
-  // Fetch credits function
+  // ─── Fetch Credits ───
   const fetchCredits = useCallback(async (): Promise<void> => {
     try {
       const c: number = await getUserCredits();
@@ -111,38 +108,77 @@ function Billing(): React.ReactElement {
     }
   }, []);
 
+  // ─── Initial Fetch ───
   useEffect(() => {
-    if (!user?.id) return;
+    if (user?.id) {
+      fetchCredits();
+    }
+  }, [user?.id, fetchCredits]);
 
-    // Initial fetch
-    fetchCredits();
+  // ─── ✅ Payment Verification - Runs ONCE on the billing page ───
+  useEffect(() => {
+    const success = searchParams.get("success");
+    const sessionId = searchParams.get("session_id");
 
-    // Re-fetch when PayButton fires the event (after successful payment)
+    if (success === "true" && sessionId && !verifyCalledRef.current) {
+      verifyCalledRef.current = true;
+      console.log("🔄 Verifying payment:", sessionId);
+
+      const verifyPayment = async () => {
+        try {
+          const result = await axios.post("/api/add-credits", { sessionId });
+          console.log("✅ Verification result:", result.data);
+
+          if (result.data.success) {
+            await update();
+            
+            // Refresh credits
+            fetchCredits();
+            
+            // Dispatch event for navbar update
+            window.dispatchEvent(new CustomEvent("credits-updated"));
+
+            if (result.data.alreadyProcessed) {
+              toast.success("Credits already added to your account!");
+            } else {
+              toast.success(`${result.data.creditsAdded || 0} credits added successfully! 🎉`);
+            }
+          }
+        } catch (err: any) {
+          console.error("❌ Verification failed:", err);
+          toast.error("Failed to verify payment");
+        } finally {
+          // Clean URL
+          router.replace("/billing");
+        }
+      };
+
+      verifyPayment();
+    }
+  }, []); // ✅ Empty array - runs only once on mount
+
+  // ─── Listen for credits update event ───
+  useEffect(() => {
     const handleCreditsUpdated = (): void => {
       fetchCredits();
     };
 
     window.addEventListener("credits-updated", handleCreditsUpdated);
-    
     return () => {
       window.removeEventListener("credits-updated", handleCreditsUpdated);
     };
-  }, [user?.id, fetchCredits]);
+  }, [fetchCredits]);
 
   const isLoading: boolean = !pageReady || credits === null;
 
   return (
     <div className="p-4 md:p-6 bg-slate-50 h-[70vh] flex flex-col overflow-hidden">
-
-      {/* Header */}
       <div className="mb-4">
         <h1 className="text-xl font-extrabold text-slate-900">Billing & Credits</h1>
         <p className="text-slate-500 text-xs">Manage your usage and top up your credits.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 overflow-hidden min-h-0">
-
-        {/* LEFT: Balance Card */}
         <div className="lg:col-span-1 h-full">
           {isLoading ? (
             <SkeletonBalance />
@@ -162,10 +198,8 @@ function Billing(): React.ReactElement {
           )}
         </div>
 
-        {/* RIGHT: Plan Cards */}
         <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-3 h-full overflow-hidden">
           {isLoading ? (
-            // Show skeleton cards while loading
             plans.map((plan: Plan) => (
               <SkeletonCard key={plan.name} recommended={plan.recommended} />
             ))
@@ -194,7 +228,7 @@ function Billing(): React.ReactElement {
                   <div className="flex items-baseline gap-1">
                     <span className="text-xl font-black text-slate-900">${plan.price}</span>
                   </div>
-                  <p className="text-blue-600 font-bold text-xs">{plan.interviews} Interviews</p>
+                  <p className="text-blue-600 font-bold text-xs">{plan.interviews} Credits</p>
                 </div>
 
                 <ul className="flex-1 space-y-1.5 mb-4 overflow-hidden">

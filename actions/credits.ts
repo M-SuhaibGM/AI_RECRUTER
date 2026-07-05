@@ -3,7 +3,13 @@ import { prisma as db } from "@/lib/db";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-export async function addCredits(addedCredits) {
+interface AddCreditsResult {
+  success?: boolean;
+  newTotal?: number;
+  error?: string;
+}
+
+export async function addCredits(addedCredits: number): Promise<AddCreditsResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.id) {
@@ -21,7 +27,7 @@ export async function addCredits(addedCredits) {
     });
 
     return { success: true, newTotal: updatedUser.credits };
-  } catch (err) {
+  } catch (err: unknown) {
     console.error(err);
     return { error: "Failed to update credits in database" };
   }

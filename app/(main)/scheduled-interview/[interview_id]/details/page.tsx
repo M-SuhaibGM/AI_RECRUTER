@@ -202,7 +202,7 @@ function InterviewDetails(): React.ReactElement {
 
   // ─── Main Render ───
   return (
-    <div className="space-y-8 h-[68vh] overflow-y-auto pr-2 scrollbar-thin">
+    <div className="space-y-8 h-[78vh] overflow-y-auto pr-2 scrollbar-thin">
       {/* Header with Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1">

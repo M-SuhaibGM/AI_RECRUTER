@@ -3,9 +3,18 @@ import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
 import axios from "axios";
 
-export function useAntiCheat(isInterviewActive, candidateId, dbTabSwitches) {
-  const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const timestamps = useRef([]);
+interface AntiCheatReturn {
+  tabSwitchCount: number;
+  switchTimestamps: string[];
+}
+
+export function useAntiCheat(
+  isInterviewActive: boolean,
+  candidateId: string,
+  dbTabSwitches: number
+): AntiCheatReturn {
+  const [tabSwitchCount, setTabSwitchCount] = useState<number>(0);
+  const timestamps = useRef<string[]>([]);
 
   // Sync state when database value is retrieved
   useEffect(() => {
@@ -18,10 +27,10 @@ export function useAntiCheat(isInterviewActive, candidateId, dbTabSwitches) {
     // Only track when the Vapi call is actively live
     if (!isInterviewActive) return;
 
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = (): void => {
       if (document.hidden) {
-        setTabSwitchCount((prev) => {
-          const newCount = prev + 1;
+        setTabSwitchCount((prev: number) => {
+          const newCount: number = prev + 1;
           
           // Stern warning alert to discourage further cheating attempts
           toast.error(`Warning: Tab switching detected (${newCount}). This incident has been flagged for HR review.`, {
@@ -35,7 +44,7 @@ export function useAntiCheat(isInterviewActive, candidateId, dbTabSwitches) {
               candidateId,
               browser: typeof navigator !== "undefined" ? navigator.userAgent : "",
               platform: typeof navigator !== "undefined" ? navigator.platform : "",
-            }).catch((err) => {
+            }).catch((err: unknown) => {
               console.error("Failed to log tab switch in real-time:", err);
             });
           }
