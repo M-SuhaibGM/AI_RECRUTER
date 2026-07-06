@@ -316,7 +316,7 @@ export default function CompletedPage(): React.ReactElement {
                 </h1>
                 <p className="text-sm text-slate-400 leading-relaxed max-w-[270px] mx-auto">
                   Great work! Your responses have been recorded and forwarded to
-                  the recruiter at{" "}
+                  the recruiter at
                   <span className="text-blue-400 font-semibold">AIcruiter</span>.
                 </p>
               </div>
@@ -393,7 +393,7 @@ export default function CompletedPage(): React.ReactElement {
                 >
                   ✦ Best of Luck ✦
                 </p>
-                <p className="text-[10px] text-slate-600">We'll be in touch soon.</p>
+                <p className="text-[10px] text-slate-600">We`&#39;`ll be in touch soon.</p>
               </div>
 
               {/* ── CTA ── */}

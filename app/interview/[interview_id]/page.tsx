@@ -1,5 +1,5 @@
 "use client";
-import React, { useContext, useEffect, useState, ChangeEvent } from "react";
+import React, { useContext, useEffect, useState, ChangeEvent, useCallback } from "react";
 import Image from "next/image";
 import { Clock, Info, Loader2Icon, Video, User, Mail, Briefcase, MonitorSmartphone } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -53,7 +53,7 @@ function Interview(): React.ReactElement | null {
   }, []);
 
   // ─── Fetch Interview Details ───
-  const GetInterviewDetail = async (): Promise<void> => {
+  const GetInterviewDetail = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
       const response: Response = await fetch(`/api/interviews/details/${interview_id}`);
@@ -71,16 +71,16 @@ function Interview(): React.ReactElement | null {
     } finally {
       setLoading(false);
     }
-  };
+  }, [interview_id]);
 
   useEffect(() => {
     if (interview_id) GetInterviewDetail();
-  }, [interview_id]);
+  }, [interview_id, GetInterviewDetail]);
 
   // ─── Join Interview ───
   const onJoinInterview = async (): Promise<void> => {
     setFormLoading(true);
-    
+
     if (!userName.trim() || !userEmail.trim()) {
       toast.warning("Missing Information", {
         description: "Please enter both your name and email to continue.",
