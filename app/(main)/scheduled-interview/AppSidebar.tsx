@@ -103,7 +103,7 @@ export function AppSidebar(): React.ReactElement {
 
   return (
     <Sidebar
-      defaultOpen={isDesktop}
+      collapsible="icon"
       className={`border-r border-slate-200 bg-white transition-all duration-300 ${
         isCollapsed ? "w-[80px]" : "w-[280px]"
       }`}
@@ -179,13 +179,13 @@ export function AppSidebar(): React.ReactElement {
                 : path.startsWith(option.path);
               
               return (
-                <SidebarMenuItem key={index} className={undefined}>
+                <SidebarMenuItem key={index} >
                   <SidebarMenuButton
                     asChild
                     className={`relative flex items-center h-12 rounded-xl transition-all duration-200 group
                       ${isCollapsed ? "justify-center px-2" : "px-4"}
                       ${isActive
-                        ? "bg-blue-50 text-blue-700 font-semibold"
+                        ? "bg-blue-300 text-blue-700 font-semibold"
                         : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}
                       ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}
                     `}
