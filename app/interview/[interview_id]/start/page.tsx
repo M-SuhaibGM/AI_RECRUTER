@@ -7,7 +7,7 @@ import axios from "axios";
 import { useParams, useRouter } from "next/navigation";
 import InterviewInterface from "./_components/InterviewInterface";
 import InterviewControls from "./_components/InterviewControls";
-import MicTest from "./_components/MicTest";
+import { PreInterviewCheck } from "./_components/PreInterviewCheck";
 import { Bot, Clock, Shield } from "lucide-react";
 import { STYLES } from "@/services/Constants";
 import { useAntiCheat } from "@/hooks/useAntiCheat";
@@ -18,6 +18,7 @@ interface Question {
   answer?: string;
   type?: string;
 }
+
 interface UserConfig {
   language: string;
   voiceId: string;
@@ -85,11 +86,12 @@ function StartInterview(): React.ReactElement {
     voiceProvider: "vapi",
   });
   const [isConfigLoaded, setIsConfigLoaded] = useState<boolean>(false);
-  const [isMicChecked, setIsMicChecked] = useState<boolean>(false);
+  const [isPreCheckComplete, setIsPreCheckComplete] = useState<boolean>(false); // ✅ NEW - replaces isMicChecked
   const [volume, setVolume] = useState<number>(0);
   const [elapsedSecs, setElapsedSecs] = useState<number>(0);
   const { tabSwitchCount, switchTimestamps } = useAntiCheat(activeUser, "", 0);
   const totalQuestions: number = interviewInfo?.interviewData?.questions?.length || 5;
+
 
   /* ───────────────────────── Keep Anti-Cheat Refs Synced ───────────────────────── */
   useEffect(() => {
@@ -140,28 +142,73 @@ function StartInterview(): React.ReactElement {
       });
   }, []);
 
-  /* ───────────────────────── Question index — deduped ───────────────────────── */
+  /* ───────────────────────── Question index — SIMPLE & RELIABLE ───────────────────────── */
   const currentQuestionIndex: number = useMemo(() => {
     if (!conversation) return 0;
     try {
       const logs: ConversationMessage[] = JSON.parse(conversation);
-      const assistantTurns: number = logs.reduce((count: number, msg: ConversationMessage, i: number) => {
-        const isAssistant: boolean = msg.role === "assistant" || msg.role === "bot";
-        const prevWasAssistant: boolean = i > 0 && (logs[i - 1].role === "assistant" || logs[i - 1].role === "bot");
-        const isSubstantial: boolean = (msg.content || msg.message || "").length > 15;
-        if (isAssistant && !prevWasAssistant && isSubstantial) return count + 1;
-        return count;
-      }, 0);
-      return Math.min(assistantTurns, totalQuestions);
+
+      // ✅ Count substantial user responses (candidate answers)
+      // Each substantial response = 1 question answered
+      let responseCount = 0;
+      let lastUserContent = "";
+
+      for (const msg of logs) {
+        if (msg.role === "user") {
+          const content = (msg.content || msg.message || "").trim();
+
+          // Count as a real response if:
+          // 1. It's longer than 30 characters
+          // 2. It's not just "yes", "no", "repeat", etc.
+          const isRealResponse = content.length > 30 &&
+            !["yes", "no", "repeat", "ok", "okay", "sure", "yeah", "ready", "repeat the question", "can you repeat"].includes(content.toLowerCase());
+
+          if (isRealResponse && content !== lastUserContent) {
+            responseCount++;
+            lastUserContent = content;
+          }
+        }
+      }
+
+      return Math.min(responseCount, totalQuestions);
     } catch {
       return 0;
     }
   }, [conversation, totalQuestions]);
 
-  const progressPercentage: number = useMemo(() =>
-    Math.round((currentQuestionIndex / totalQuestions) * 100),
-    [currentQuestionIndex, totalQuestions]
-  );
+  // ✅ NEW STATES for interview features
+  const [transcript, setTranscript] = useState<string>("");
+  const [aiIsSpeaking, setAiIsSpeaking] = useState<boolean>(false);
+  const [candidateIsThinking, setCandidateIsThinking] = useState<boolean>(false);
+  const [showTimeWarning, setShowTimeWarning] = useState<boolean>(false);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ✅ More accurate question name
+  const questionNames = interviewInfo?.interviewData?.questions?.map((q: Question) => {
+    const words = q.question?.split(" ") || [];
+    return words.slice(0, 4).join(" ") + (words.length > 4 ? "..." : "");
+  }) || [];
+
+  const currentQuestionName = questionNames[currentQuestionIndex] ||
+    `Question ${Math.min(currentQuestionIndex + 1, totalQuestions)}`;
+  const totalDuration = parseInt(String(interviewInfo?.interviewData?.duration || "0")) * 60;
+
+  const progressPercentage: number = useMemo(() => {
+    if (totalQuestions === 0) return 0;
+
+    // ✅ Count both questions asked AND questions answered
+    // Progress = questions completed (answered) / total questions
+    const completedQuestions = currentQuestionIndex;
+
+    // ✅ Add partial progress if currently on a question
+    // If candidate is speaking (answering), consider it 50% of current question
+    let partialProgress = 0;
+    if (activeUser && !aiIsSpeaking) {
+      partialProgress = 0.5; // Candidate is answering = half progress on current question
+    }
+
+    const totalProgress = ((completedQuestions + partialProgress) / totalQuestions) * 100;
+    return Math.round(Math.min(totalProgress, 100));
+  }, [currentQuestionIndex, totalQuestions, activeUser, aiIsSpeaking]);
 
   /* ───────────────────────── Keep refs in sync ───────────────────────── */
   useEffect(() => {
@@ -172,6 +219,20 @@ function StartInterview(): React.ReactElement {
   useEffect(() => {
     conversationRef.current = conversation || null;
   }, [conversation]);
+
+  // ✅ Time Warning
+  useEffect(() => {
+    if (activeUser && totalDuration > 0) {
+      const remaining = totalDuration - elapsedSecs;
+      if (remaining <= 120 && remaining > 0 && !showTimeWarning) {
+        setShowTimeWarning(true);
+        toast.warning("⏰ 2 minutes remaining!", {
+          description: "Wrap up your current answer.",
+          duration: 5000,
+        });
+      }
+    }
+  }, [elapsedSecs, activeUser, totalDuration, showTimeWarning]);
 
   /* ───────────────────────── GenerateFeedback ───────────────────────── */
   const GenerateFeedback = useCallback(async (
@@ -226,8 +287,6 @@ function StartInterview(): React.ReactElement {
       if (isMountedRef.current) setLoading(false);
     }
   }, [interviewInfo, interview_id, router]);
-
-  /* ───────────────────────── startCall ───────────────────────── */
   const startCall = useCallback((vapiInstance: any): void => {
     const langMap: Record<string, string> = { "en-US": "en-US", "hi-IN": "hi", "ur-PK": "multi" };
     const sysLang: Record<string, string> = {
@@ -239,6 +298,9 @@ function StartInterview(): React.ReactElement {
     const ql: string = interviewInfo?.interviewData?.questions
       ?.map((q: Question, i: number) => `${i + 1}. ${q.question}`)
       .join("\n") || "";
+
+    // ✅ Get question names for progress display
+    const questionNames = interviewInfo?.interviewData?.questions?.map((q: Question) => q.question) || [];
 
     let welcome: string = `Hi ${interviewInfo?.userName}! Ready to start?`;
     if (config.language.startsWith("hi"))
@@ -263,15 +325,41 @@ function StartInterview(): React.ReactElement {
         model: "gpt-4o-mini",
         messages: [{
           role: "system",
-          content: `You are an AI recruiter. Conduct the interview in ${sysLang[config.language] || "English"}. Ask these questions one by one:\n${ql}\nAsk one question, then stay completely silent and wait for the candidate to fully respond. Do not interrupt or move to the next question until the candidate has clearly finished their answer.`,
+          content: `You are an AI recruiter. Conduct the interview in ${sysLang[config.language] || "English"}.    
+Ask these questions one by one:
+${ql} Ask ONE question at a time. Wait for the candidate to fully respond. AFTER Candiadte fully answered the current question  say "Shall we move to the next question?" and wait for confirmation before proceeding to next question .If the candidate says "repeat","repeat the question", then wait for their answer .Do NOT interrupt the candidate while they are speaking. After all questions are answered, say "Thank you for completing the interview! Have a great day." and end the conversation.`,
         }],
       },
     });
   }, [interviewInfo, config]);
 
+
+  // ✅ Repeat question handler - Alternative approach
+  const handleRepeatQuestion = useCallback((): void => {
+    if (vapiRef.current && isCallActiveRef.current) {
+      try {
+        // Option 1: Add message to conversation
+        vapiRef.current.send({
+          type: "add-message",
+          message: {
+            role: "user",
+            content: "repeat the question",
+          },
+        });
+
+        // Option 2: If Vapi has a direct say method
+        // vapiRef.current.say("Can you please repeat the last question?");
+
+        toast.success("Repeating question...");
+      } catch (err) {
+        toast.error("Failed to repeat question.");
+      }
+    }
+  }, []);
   /* ───────────────────────── Vapi setup ───────────────────────── */
+  // ─── Enhanced Vapi setup ───
   useEffect(() => {
-    if (!interviewInfo || hasInterviewStarted || !isMicChecked || !isConfigLoaded) return;
+    if (!interviewInfo || hasInterviewStarted || !isPreCheckComplete || !isConfigLoaded) return;
     if (initStartedRef.current) return;
     initStartedRef.current = true;
 
@@ -283,18 +371,33 @@ function StartInterview(): React.ReactElement {
       if (isMountedRef.current) setActiveUser(true);
     });
 
+    // ✅ Track AI speaking
     vapi.on("speech-start", () => {
       if (!hasGreetedRef.current) {
         hasGreetedRef.current = true;
         toast.success("Interview started!");
       }
-      if (isMountedRef.current) setStartTimer(false);
+      if (isMountedRef.current) {
+        setStartTimer(false);
+        setAiIsSpeaking(true);
+        setCandidateIsThinking(false);
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      }
     });
 
+    // ✅ Track candidate thinking (silence detection)
     vapi.on("speech-end", () => {
       if (isMountedRef.current) {
         setStartTimer(true);
         setResetTimer(true);
+        setAiIsSpeaking(false);
+
+        // Start silence timer - if no speech for 5 seconds, show thinking indicator
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          if (isMountedRef.current) setCandidateIsThinking(true);
+        }, 5000);
+
         setTimeout(() => {
           if (isMountedRef.current) setResetTimer(false);
         }, 50);
@@ -302,20 +405,46 @@ function StartInterview(): React.ReactElement {
     });
 
     vapi.on("volume-level", (l: number) => {
-      if (isMountedRef.current) setVolume(l);
+      if (isMountedRef.current) {
+        setVolume(l);
+        // Reset thinking indicator when candidate speaks
+        if (l > 0.02) {
+          setCandidateIsThinking(false);
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        }
+      }
     });
 
+    // ✅ Track transcript messages
     vapi.on("message", (msg: VapiMessage) => {
       if (msg?.conversation) {
         const c: string = JSON.stringify(msg.conversation);
         conversationRef.current = c;
         if (isMountedRef.current) setConversation(c);
+
+        // Extract last AI message for transcript
+        try {
+          const conv = typeof msg.conversation === "string"
+            ? JSON.parse(msg.conversation)
+            : msg.conversation;
+          if (Array.isArray(conv)) {
+            const lastMsg = conv[conv.length - 1];
+            if (lastMsg?.role === "assistant" || lastMsg?.role === "bot") {
+              const text = lastMsg.content || lastMsg.message || "";
+              if (isMountedRef.current) setTranscript(text);
+            }
+          }
+        } catch { }
       }
     });
 
     vapi.on("call-end", () => {
       isCallActiveRef.current = false;
-      if (isMountedRef.current) setActiveUser(false);
+      if (isMountedRef.current) {
+        setActiveUser(false);
+        setAiIsSpeaking(false);
+        setCandidateIsThinking(false);
+      }
 
       const latestIndex: number = currentQuestionIndexRef.current;
       const latestProgress: number = progressPercentageRef.current;
@@ -342,6 +471,7 @@ function StartInterview(): React.ReactElement {
 
       if (isMountedRef.current) {
         toast.error("Connection error — check your internet.");
+        router.replace(`/interview/${interview_id}/completed`);
       }
     });
 
@@ -352,13 +482,13 @@ function StartInterview(): React.ReactElement {
 
     return () => {
       vapi.removeAllListeners();
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (isCallActiveRef.current) {
         try { vapi.stop(); } catch { }
         isCallActiveRef.current = false;
       }
     };
-  }, [interviewInfo, isMicChecked, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
-
+  }, [interviewInfo, isPreCheckComplete, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
   /* ─────────────────────────── RENDER ─────────────────────── */
   return (
     <>
@@ -406,69 +536,67 @@ function StartInterview(): React.ReactElement {
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="absolute inset-0 rounded-xl blur-md" style={{ background: "rgba(37,99,235,.5)" }} />
-              <div
-                className="relative w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: "linear-gradient(135deg,#1d4ed8,#3b82f6)", border: "1px solid rgba(96,165,250,.3)" }}
-              >
+              <div className="relative w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg,#1d4ed8,#3b82f6)", border: "1px solid rgba(96,165,250,.3)" }}>
                 <Bot style={{ width: 18, height: 18, color: "#fff" }} />
               </div>
             </div>
             <div>
-              <span
-                className="font-bold text-white text-sm tracking-wide"
-                style={{ fontFamily: "'Syne',sans-serif", letterSpacing: ".08em" }}
-              >
+              <span className="font-bold text-white text-sm tracking-wide" style={{ fontFamily: "'Syne',sans-serif", letterSpacing: ".08em" }}>
                 AI<span style={{ color: "#60a5fa" }}>RECRUITER</span>
               </span>
-              <div className="text-[9px] text-slate-500 uppercase tracking-widest -mt-0.5">
-                Powered by Vapi
-              </div>
+              <div className="text-[9px] text-slate-500 uppercase tracking-widest -mt-0.5">Powered by Vapi</div>
             </div>
           </div>
 
-          {isMicChecked && (
-            <div className="hidden md:flex items-center gap-2">
-              <span className="text-[10px] text-slate-400 uppercase tracking-widest">Question</span>
+          {/* ✅ Question Progress with Names */}
+          {isPreCheckComplete && (
+            <div className="hidden md:flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[9px] text-slate-500 uppercase tracking-widest block">Question {currentQuestionIndex}/{totalQuestions}</span>
+                <span className="text-[11px] text-blue-400 font-bold truncate max-w-[200px] block">
+                  {currentQuestionName}
+                </span>
+              </div>
               <div className="flex items-center gap-1">
                 {Array.from({ length: totalQuestions }).map((_, i: number) => (
-                  <div
-                    key={i}
-                    className="h-1.5 w-6 rounded-full transition-all duration-500"
+                  <div key={i} className="h-1.5 w-6 rounded-full transition-all duration-500"
                     style={{
                       background: i < currentQuestionIndex
                         ? "linear-gradient(90deg,#3b82f6,#60a5fa)"
                         : "rgba(255,255,255,.08)",
-                    }}
-                  />
+                    }} />
                 ))}
               </div>
-              <span className="text-[10px] text-slate-400">{currentQuestionIndex}/{totalQuestions}</span>
             </div>
           )}
 
           <div className="flex items-center gap-3">
+            {/* ✅ Time Warning */}
+            {showTimeWarning && (
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full animate-pulse"
+                style={{ background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.3)" }}>
+                <Clock style={{ width: 12, height: 12, color: "#fbbf24" }} />
+                <span className="text-[10px] text-amber-400 font-bold">
+                  {Math.floor((totalDuration - elapsedSecs) / 60)}:{(totalDuration - elapsedSecs) % 60 < 10 ? '0' : ''}{(totalDuration - elapsedSecs) % 60} left
+                </span>
+              </div>
+            )}
+
             {activeUser && (
-              <div
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full"
-                style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}
-              >
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full"
+                style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}>
                 <Clock style={{ width: 12, height: 12, color: "#4ade80" }} />
                 <span className="text-[11px] font-mono text-green-400 font-bold">{fmtTime(elapsedSecs)}</span>
               </div>
             )}
-            <div
-              className="badge-live flex items-center gap-2 px-3 py-1.5 rounded-full"
-              style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}
-            >
-              <div className="live-dot flex items-center gap-[3px]">
-                <span /><span /><span />
-              </div>
+            <div className="badge-live flex items-center gap-2 px-3 py-1.5 rounded-full"
+              style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}>
+              <div className="live-dot flex items-center gap-[3px]"><span /><span /><span /></div>
               <span className="text-[10px] font-bold text-green-400 uppercase tracking-widest">Live</span>
             </div>
-            <div
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-              style={{ background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)" }}
-            >
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+              style={{ background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)" }}>
               <Shield style={{ width: 12, height: 12, color: "#64748b" }} />
               <span className="text-[10px] text-slate-400 uppercase tracking-widest">Secure</span>
             </div>
@@ -477,20 +605,14 @@ function StartInterview(): React.ReactElement {
 
         {/* ══ MAIN ══ */}
         <main className="main-anim flex-1 relative z-10 flex flex-col items-center justify-center px-4 md:px-16 overflow-hidden">
-          {!isMicChecked ? (
-            <div className="relative w-full max-w-md">
-              <div
-                className="absolute inset-0 rounded-3xl blur-2xl -z-10"
-                style={{ background: "rgba(37,99,235,.15)", transform: "scale(1.1)" }}
-              />
-              <div
-                className="scan-wrap rounded-3xl overflow-hidden"
-                style={{ border: "1px solid rgba(255,255,255,.08)", background: "rgba(2,8,23,.6)", backdropFilter: "blur(30px)" }}
-              >
-                <MicTest onMicReady={() => setIsMicChecked(true)} />
-              </div>
-            </div>
+          {!isPreCheckComplete ? (
+            /* ✅ Pre-Interview Check (Mic + Camera + Tips + Sample Question) */
+            <PreInterviewCheck
+              interviewData={interviewInfo?.interviewData}
+              onAllReady={() => setIsPreCheckComplete(true)}
+            />
           ) : (
+            /* ✅ Interview Interface */
             <div className="w-full max-w-5xl h-full flex flex-col justify-center py-6">
               <div className="mb-6 space-y-2">
                 <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase tracking-widest">
@@ -498,8 +620,7 @@ function StartInterview(): React.ReactElement {
                   <span className="text-blue-400 font-bold">{progressPercentage}%</span>
                 </div>
                 <div className="h-px w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.06)" }}>
-                  <div
-                    className="h-full rounded-full transition-all duration-700"
+                  <div className="h-full rounded-full transition-all duration-700"
                     style={{
                       width: `${progressPercentage}%`,
                       background: "linear-gradient(90deg,#1d4ed8,#60a5fa,#38bdf8)",
@@ -513,25 +634,23 @@ function StartInterview(): React.ReactElement {
                 currentQuestionIndex={currentQuestionIndex}
                 totalQuestions={totalQuestions}
                 activeUser={activeUser}
+                aiIsSpeaking={aiIsSpeaking}
+                candidateIsThinking={candidateIsThinking}
+                transcript={transcript}
+                currentQuestionName={currentQuestionName}
+                onRepeatQuestion={handleRepeatQuestion}
               />
             </div>
           )}
         </main>
 
         {/* ══ FOOTER ══ */}
-        {isMicChecked && (
-          <footer
-            className="footer-anim relative z-20 shrink-0 px-6 md:px-16 py-4"
-            style={{
-              borderTop: "1px solid rgba(255,255,255,.06)",
-              background: "rgba(2,8,23,.8)",
-              backdropFilter: "blur(24px)",
-            }}
-          >
+        {isPreCheckComplete && (
+          <footer className="footer-anim relative z-20 shrink-0 px-6 md:px-16 py-4"
+            style={{ borderTop: "1px solid rgba(255,255,255,.06)", background: "rgba(2,8,23,.8)", backdropFilter: "blur(24px)" }}>
             {activeUser && (
               <div className="absolute top-0 left-0 right-0 h-px overflow-hidden">
-                <div
-                  className="h-full transition-all duration-75"
+                <div className="h-full transition-all duration-75"
                   style={{
                     width: `${Math.min(100, volume * 400)}%`,
                     background: "linear-gradient(90deg,#3b82f6,#60a5fa,#38bdf8)",

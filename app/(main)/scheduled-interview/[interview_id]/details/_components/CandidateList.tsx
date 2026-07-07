@@ -2,18 +2,20 @@
 import moment from "moment";
 import React from "react";
 import CandidateFeedbackDialog from "./CandidateFeedbackDialog";
-import { 
-  SearchX, 
-  Trophy, 
-  Download, 
-  UserCheck, 
-  FileSpreadsheet, 
+import {
+  SearchX,
+  Trophy,
+  Download,
+  UserCheck,
+  FileSpreadsheet,
   Users,
   Calendar,
   AlertTriangle,
   CheckCircle2,
   XCircle,
-  Shield
+  Shield,
+  TrendingUp,
+  Minus
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -87,17 +89,17 @@ function getAverageScore(feedbackData: Feedback | null | undefined): number {
   }
 
   const rating = feedbackData?.feedback?.rating || feedbackData?.rating;
-  
+
   if (!rating) {
     return 0;
   }
 
-  const avg: number = 
+  const avg: number =
     (rating.technicalSkills || 0) +
     (rating.communication || 0) +
     (rating.problemSolving || 0) +
     (rating.experience || 0);
-  
+
   return avg / 4;
 }
 
@@ -108,12 +110,13 @@ function formatDate(date: string | Date | undefined): string {
 
 // ─── Status Badge Component ───
 interface StatusBadgeProps {
-  status: string | null | undefined;
-  type: "status" | "exit" | "tabs";
+  status: string | null | undefined | number;
+  type: "status" | "exit" | "tabs" | "progress";
   tabSwitches?: number;
 }
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status, type, tabSwitches }) => {
+  // Tab switches
   if (type === "tabs") {
     const switches = tabSwitches || 0;
     return switches > 0 ? (
@@ -127,14 +130,51 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status, type, tabSwitches }) 
     );
   }
 
+  // Progress at exit
+  if (type === "progress") {
+    const progress = Number(status) || 0;
+
+    if (progress === 100) {
+      return (
+        <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md mt-1 flex items-center gap-1">
+          <CheckCircle2 className="w-3 h-3" /> 100% Complete
+        </span>
+      );
+    } else if (progress >= 75) {
+      return (
+        <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md mt-1 flex items-center gap-1">
+          <TrendingUp className="w-3 h-3" /> {progress}%
+        </span>
+      );
+    } else if (progress >= 50) {
+      return (
+        <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md mt-1 flex items-center gap-1">
+          <Minus className="w-3 h-3" /> {progress}%
+        </span>
+      );
+    } else if (progress > 0) {
+      return (
+        <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md mt-1 flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" /> {progress}%
+        </span>
+      );
+    } else {
+      return (
+        <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md mt-1 flex items-center gap-1">
+          <XCircle className="w-3 h-3" /> 0% (Early Exit)
+        </span>
+      );
+    }
+  }
+
+  // Completion status & exit reason
   const isSuccess: boolean = status === "Success" || status === "Completed";
-  
+
   return (
-    <span className={`text-xs font-bold px-2 py-0.5 rounded-md mt-1 flex items-center gap-1 ${
-      isSuccess 
-        ? "text-emerald-600 bg-emerald-50" 
-        : "text-red-600 bg-red-50"
-    }`}>
+    <span className={`text-xs font-bold px-2 py-0.5 rounded-md mt-1 flex items-center gap-1 ${isSuccess
+      ? "text-emerald-600 bg-emerald-50"
+      : "text-red-600 bg-red-50"
+      }`}>
       {isSuccess ? (
         <CheckCircle2 className="w-3 h-3" />
       ) : (
@@ -164,9 +204,8 @@ const RankBadge: React.FC<RankBadgeProps> = ({ index }) => {
   };
 
   return (
-    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg font-bold text-sm ${
-      rankStyles[index] || "text-slate-400"
-    }`}>
+    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg font-bold text-sm ${rankStyles[index] || "text-slate-400"
+      }`}>
       {rankLabels[index] || index + 1}
     </span>
   );
@@ -201,7 +240,7 @@ const EmptyState: React.FC = () => (
 
 // ─── Main Component ───
 function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
-  
+
   // Loading state
   if (!candidate) {
     return <CandidateListSkeleton />;
@@ -220,7 +259,7 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
   // ─── PDF Export ───
   const downloadPDF = (): void => {
     const doc = new jsPDF();
-    
+
     // Title
     doc.setFontSize(18);
     doc.text("Candidate Ranking Report", 14, 22);
@@ -232,8 +271,8 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
     // Table rows
     const tableRows: (string | number)[][] = rankedCandidates.map((c: Candidate, index: number) => {
       const rawDate = c.created_at || c.createdAt;
-      const formattedDate: string = rawDate 
-        ? moment(rawDate).format("DD MMM, YYYY") 
+      const formattedDate: string = rawDate
+        ? moment(rawDate).format("DD MMM, YYYY")
         : "N/A";
 
       return [
@@ -284,7 +323,7 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
               <Trophy className="h-5 w-5" /> Generate Ranking
             </Button>
           </DialogTrigger>
-          
+
           <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden flex flex-col p-0 border-none">
             <DialogHeader className="p-8 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
               <div className="flex items-center gap-3">
@@ -313,8 +352,8 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
                   </TableHeader>
                   <TableBody className={undefined}>
                     {rankedCandidates.map((c: Candidate, index: number) => (
-                      <TableRow 
-                        key={c.id || index} 
+                      <TableRow
+                        key={c.id || index}
                         className="hover:bg-blue-50/30 transition-colors border-slate-50"
                       >
                         <TableCell className="py-4">
@@ -341,8 +380,8 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
             </div>
 
             <div className="p-6 bg-slate-50 flex justify-end gap-3 border-t">
-              <Button 
-                onClick={downloadPDF} 
+              <Button
+                onClick={downloadPDF}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl gap-2 px-6"
               >
                 <Download className="h-4 w-4" /> Export Report
@@ -386,6 +425,13 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
                 </span>
                 <StatusBadge status={c?.completionStatus} type="status" />
               </div>
+              {/* progress-at exit */}
+              <div className="flex flex-col items-start md:items-end">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Progress at Exit
+                </span>
+                <StatusBadge status={c?.progressAtExit} type="progress" />
+              </div>
 
               {/* Exit Reason */}
               <div className="flex flex-col items-start md:items-end">
@@ -400,10 +446,10 @@ function CandidateList({ candidate }: CandidateListProps): React.ReactElement {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   Tab Switches
                 </span>
-                <StatusBadge 
-                  status={null} 
-                  type="tabs" 
-                  tabSwitches={c?.tabSwitches} 
+                <StatusBadge
+                  status={null}
+                  type="tabs"
+                  tabSwitches={c?.tabSwitches}
                 />
               </div>
 

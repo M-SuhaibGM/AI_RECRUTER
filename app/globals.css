@@ -154,3 +154,14 @@
   --input: rgb(229, 231, 235) !important;
   --ring: rgb(37, 99, 235) !important;
 }
+/* In your global CSS or style tag */
+.mirror {
+  transform: scaleX(-1);
+}
+
+/* Ensure video fills container */
+video {
+  object-fit: cover !important;
+  width: 100% !important;
+  height: 100% !important;
+}
