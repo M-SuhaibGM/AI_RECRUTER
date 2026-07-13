@@ -13,7 +13,6 @@ interface InterviewData {
   questions: any;
   type: any;
   createdAt: Date;
-  updatedAt: Date;
   userEmail: string;
 }
 
@@ -47,7 +46,6 @@ interface ErrorResponse {
 function logApiEvent(event: string, details: Record<string, any>): void {
   const timestamp = new Date().toISOString();
   const emoji = event.includes("Error") ? "❌" : event.includes("PUT") ? "✏️" : "📋";
-  console.log(`[${timestamp}] ${emoji} ${event}:`, JSON.stringify(details, null, 2));
 }
 
 function sanitizeString(input: string, maxLength: number = 500): string {
@@ -108,7 +106,6 @@ export async function GET(
         questions: true,
         type: true,
         createdAt: true,
-        updatedAt: true,
         userEmail: true,
       },
     });
@@ -236,7 +233,6 @@ export async function PUT(
         jobPosition: true,
         duration: true,
         jobDescription: true,
-        updatedAt: true,
       },
     });
 
