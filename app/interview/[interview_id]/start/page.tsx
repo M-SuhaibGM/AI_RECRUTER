@@ -526,7 +526,7 @@ CRITICAL RULES - FOLLOW STRICTLY:
         isCallActiveRef.current = false;
       }
     };
-  }, [interviewInfo, isPreCheckComplete, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
+  }, [interviewInfo, isPreCheckComplete,interview_id,router, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
   /* ─────────────────────────── RENDER ─────────────────────── */
   return (
     <>

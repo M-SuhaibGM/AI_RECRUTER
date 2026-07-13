@@ -79,7 +79,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
         cameraStream.getTracks().forEach((t: MediaStreamTrack) => t.stop());
       }
     };
-  }, [activeUser]);
+  }, [activeUser,cameraStream]);
 
   // AI status simulation
   useEffect(() => {

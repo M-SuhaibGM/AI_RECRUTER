@@ -561,7 +561,7 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
                         onClick={() => setShowTips(!showTips)}>
                         <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                         <p className="text-xs text-amber-300 truncate">
-                            <span className="font-bold">Sample:</span> "{sampleQuestion}"
+                            <span className="font-bold">Sample:</span> &quot;{sampleQuestion}&quot;
                         </p>
                         {showTips ? <ChevronUp className="w-3.5 h-3.5 text-amber-400 ml-auto shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-amber-400 ml-auto shrink-0" />}
                     </div>
