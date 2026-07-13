@@ -23,7 +23,6 @@ export async function POST(req: Request) {
     }
 
     const { jobPosition, jobDescription, duration, questions, type, interview_link } = validation.data;
-
     const result = await prisma.$transaction(async (tx) => {
       const newInterview = await tx.interview.create({
         data: {
@@ -31,8 +30,8 @@ export async function POST(req: Request) {
           jobDescription,
           duration,
           interviewLink: interview_link,
-          questions,
-          type,
+          questions: JSON.stringify(questions),
+          type: JSON.stringify(type),
           userEmail: session.user.email,
         },
       });
@@ -56,6 +55,9 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("API Error:", error);
+    if (error instanceof Error) {
+      console.error("API Error stack:", error.stack);
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Internal Server Error" },
       { status: 500 }
