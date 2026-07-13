@@ -1,12 +1,13 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
-import { 
-  Video, 
-  RefreshCw, 
-  Search, 
+import {
+  Video,
+  RefreshCw,
+  Search,
   Download,
   TrendingUp,
-  Users
+  Users,
+  DatabaseZapIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,10 +79,10 @@ interface HeaderSectionProps {
   isRefreshing?: boolean;
 }
 
-const HeaderSection: React.FC<HeaderSectionProps> = ({ 
-  onRefresh, 
-  onExport, 
-  isRefreshing 
+const HeaderSection: React.FC<HeaderSectionProps> = ({
+  onRefresh,
+  onExport,
+  isRefreshing
 }) => (
   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
@@ -125,7 +126,7 @@ const HeaderSection: React.FC<HeaderSectionProps> = ({
 function ScheduledInterview(): React.ReactElement {
   const { data: session } = useSession();
   const user = session?.user;
-  
+
   const [interviewList, setInterviewList] = useState<Interview[]>([]);
   const [filteredList, setFilteredList] = useState<Interview[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -141,11 +142,12 @@ function ScheduledInterview(): React.ReactElement {
       setIsRefreshing(true);
     }
     setError(null);
-    
+
     try {
       const response = await axios.get<Interview[]>("/api/interviews/reports");
       const data: Interview[] = response.data || [];
       setInterviewList(data);
+      console.log(data);
       setFilteredList(data);
     } catch (err: unknown) {
       const axiosError = err as AxiosError<ApiErrorResponse>;
@@ -176,8 +178,8 @@ function ScheduledInterview(): React.ReactElement {
     const filtered: Interview[] = interviewList.filter((interview: Interview) => {
       const positionMatch: boolean = interview.jobPosition?.toLowerCase().includes(query) || false;
       const candidateMatch: boolean = interview.candidates?.some(
-        (c: Candidate) => 
-          c.userName?.toLowerCase().includes(query) || 
+        (c: Candidate) =>
+          c.userName?.toLowerCase().includes(query) ||
           c.userEmail?.toLowerCase().includes(query)
       ) || false;
       return positionMatch || candidateMatch;
@@ -188,23 +190,23 @@ function ScheduledInterview(): React.ReactElement {
 
   // ─── Calculate Stats ───
   const totalInterviews: number = interviewList.length;
-  
+
   const totalCandidates: number = interviewList.reduce(
-    (acc: number, interview: Interview) => 
+    (acc: number, interview: Interview) =>
       acc + (interview.candidates?.length || 0),
     0
   );
-  
+
   const averageScore: number = interviewList.length > 0
     ? Math.round(
-        interviewList.reduce((acc: number, interview: Interview) => {
-          const scores: number[] = interview.candidates?.map((c: Candidate) => c.score || 0) || [];
-          const avg: number = scores.length > 0 
-            ? scores.reduce((a: number, b: number) => a + b, 0) / scores.length 
-            : 0;
-          return acc + avg;
-        }, 0) / interviewList.length
-      )
+      interviewList.reduce((acc: number, interview: Interview) => {
+        const scores: number[] = interview.candidates?.map((c: Candidate) => c.score || 0) || [];
+        const avg: number = scores.length > 0
+          ? scores.reduce((a: number, b: number) => a + b, 0) / scores.length
+          : 0;
+        return acc + avg;
+      }, 0) / interviewList.length
+    )
     : 0;
 
   // ─── Handlers ───
@@ -236,7 +238,7 @@ function ScheduledInterview(): React.ReactElement {
   return (
     <div className="mt-8">
       {/* Header */}
-      <HeaderSection 
+      <HeaderSection
         onRefresh={handleRefresh}
         onExport={handleExport}
         isRefreshing={isRefreshing}
@@ -333,8 +335,8 @@ function ScheduledInterview(): React.ReactElement {
                 </p>
               </div>
               <Button
-                  onClick={() => setSearchQuery("")}
-                  variant="outline" className={undefined}              >
+                onClick={() => setSearchQuery("")}
+                variant="outline" className={undefined}              >
                 Clear Search
               </Button>
             </div>

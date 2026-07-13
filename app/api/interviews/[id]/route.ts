@@ -6,33 +6,6 @@ import { authOptions } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 
 // ─── Type Definitions ───
-interface Candidate {
-  id: string;
-  interviewId: string;
-  userName: string;
-  userEmail: string;
-  feedback: any;
-  exitReason: string | null;
-  completionStatus: string | null;
-  progressAtExit: number | null;
-  createdAt: Date;
-  tabSwitches: number;
-  securityFlags: any;
-}
-
-interface InterviewDetail {
-  id: string;
-  userEmail: string;
-  createdAt: Date;
-  jobPosition: string;
-  jobDescription: string;
-  duration: string;
-  interviewLink: string;
-  questions: any;
-  type: any;
-  candidates: Candidate[];
-}
-
 interface RouteParams {
   params: Promise<{
     id: string;
@@ -40,97 +13,107 @@ interface RouteParams {
 }
 
 // ─── Helper Functions ───
-function logApiEvent(event: string, details: Record<string, any>): void {
-  const timestamp = new Date().toISOString();
-  const emoji = event.includes("Error") ? "❌" : event.includes("DELETE") ? "🗑️" : "📋";
+function safeParse(value: string | null): any {
+  if (!value) return null;
+  try { return JSON.parse(value); } catch { return value; }
 }
 
 // ─── GET Handler ───
 export async function GET(
   req: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse> {
+): Promise<Response> {
   const requestStartTime = Date.now();
 
   try {
-    // 1. Verify authentication
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized access" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // 2. Extract and validate interview link
     const { id: interviewLink } = await params;
 
     if (!interviewLink) {
-      return NextResponse.json(
-        { error: "Interview link is required" },
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ error: "Interview link is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    logApiEvent("Fetching interview detail", {
-      interviewLink,
-      userEmail: session.user.email,
+    // ✅ Fetch interview
+    const interview = await prisma.interview.findFirst({
+      where: { interviewLink, userEmail: session.user.email },
     });
 
-    // 3. Fetch interview with candidates
-    const interview: InterviewDetail | null = await prisma.interview.findFirst({
-      where: {
-        interviewLink,
-        userEmail: session.user.email,
-      },
-      include: {
-        candidates: {
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-      },
-    });
-
-    // 4. Check if interview exists
     if (!interview) {
-      logApiEvent("Interview not found", { interviewLink });
-      
-      return NextResponse.json(
-        { error: "Interview not found" },
-        { status: 404 }
-      );
+      return new Response(JSON.stringify({ error: "Interview not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const processingTime = Date.now() - requestStartTime;
+    // ✅ Fetch candidates with raw query to avoid TiDB JSON issue
+    const candidates = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT 
+        id, 
+        interview_id as interviewId, 
+        userName, 
+        userEmail, 
+        CAST(feedback AS CHAR) as feedback,
+        exit_reason as exitReason, 
+        completion_status as completionStatus, 
+        progress_at_exit as progressAtExit, 
+        created_at as createdAt, 
+        tab_switches as tabSwitches, 
+        CAST(security_flags AS CHAR) as securityFlags
+      FROM candidate_details 
+      WHERE interview_id = ? 
+      ORDER BY created_at DESC`,
+      interview.interviewLink
+    );
 
-    logApiEvent("Interview fetched successfully", {
-      interviewId: interview.id,
-      interviewLink,
-      candidateCount: interview.candidates.length,
-      processingTimeMs: processingTime,
+    const result = {
+      id: interview.id,
+      userEmail: interview.userEmail,
+      createdAt: interview.createdAt,
+      jobPosition: interview.jobPosition,
+      jobDescription: interview.jobDescription,
+      duration: interview.duration,
+      interviewLink: interview.interviewLink,
+      questions: interview.questions,
+      type: interview.type,
+      candidates: candidates.map((c: any) => ({
+        id: c.id,
+        interviewId: c.interviewId,
+        userName: c.userName || "",
+        userEmail: c.userEmail || "",
+        feedback: safeParse(c.feedback),
+        exitReason: c.exitReason || null,
+        completionStatus: c.completionStatus || null,
+        progressAtExit: c.progressAtExit || 0,
+        createdAt: c.createdAt,
+        tabSwitches: c.tabSwitches || 0,
+        securityFlags: safeParse(c.securityFlags),
+      })),
+    };
+
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
-
-    // 5. Return interview details
-    return NextResponse.json(interview);
 
   } catch (error: unknown) {
-    const processingTime = Date.now() - requestStartTime;
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    
-    console.error("Fetch Interview Detail Error:", {
-      message: errorMessage,
-      processingTimeMs: processingTime,
-    });
+    const err = error as Error;
+    console.error("Fetch Interview Detail Error:", err.message);
 
-    return NextResponse.json(
-      { 
-        error: "Internal Server Error",
-        details: process.env.NODE_ENV === "development" ? errorMessage : undefined,
-      },
-      { status: 500 }
-    );
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
 
@@ -138,233 +121,109 @@ export async function GET(
 export async function DELETE(
   req: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse> {
-  const requestStartTime = Date.now();
-
+): Promise<Response> {
   try {
-    // 1. Verify authentication
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized access" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // 2. Extract interview ID
     const { id: interviewId } = await params;
 
     if (!interviewId) {
-      return NextResponse.json(
-        { error: "Interview ID is required" },
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ error: "Interview ID is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    logApiEvent("Deleting interview", {
-      interviewId,
-      userEmail: session.user.email,
-    });
-
-    // 3. Verify ownership before deletion
+    // Verify ownership
     const interview = await prisma.interview.findUnique({
-      where: {
-        id: interviewId,
-        userEmail: session.user.email,
-      },
-      select: {
-        id: true,
-        jobPosition: true,
-        _count: {
-          select: {
-            candidates: true,
-          },
-        },
-      },
+      where: { id: interviewId, userEmail: session.user.email },
     });
 
     if (!interview) {
-      logApiEvent("Interview not found for deletion", {
-        interviewId,
-        userEmail: session.user.email,
+      return new Response(JSON.stringify({ error: "Interview not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
       });
-
-      return NextResponse.json(
-        { error: "Interview not found" },
-        { status: 404 }
-      );
     }
 
-    // 4. Delete interview and related candidates in a transaction
+    // Delete in transaction
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Delete all related candidates first
-      await tx.candidateDetails.deleteMany({
-        where: {
-          interviewId,
-        },
-      });
-
-      // Then delete the interview
-      await tx.interview.delete({
-        where: {
-          id: interviewId,
-        },
-      });
+      await tx.candidateDetails.deleteMany({ where: { interviewId } });
+      await tx.interview.delete({ where: { id: interviewId } });
     });
 
-    const processingTime = Date.now() - requestStartTime;
-
-    logApiEvent("Interview deleted successfully", {
-      interviewId,
-      jobPosition: interview.jobPosition,
-      deletedCandidates: interview._count.candidates,
-      processingTimeMs: processingTime,
-    });
-
-    // 5. Return success response
-    return NextResponse.json({
-      success: true,
-      message: "Interview deleted successfully",
-      deletedCandidates: interview._count.candidates,
+    return new Response(JSON.stringify({ success: true, message: "Interview deleted successfully" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
 
   } catch (error: unknown) {
-    const processingTime = Date.now() - requestStartTime;
-    
-    // Handle Prisma errors
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      console.error("Prisma Error:", {
-        code: error.code,
-        message: error.message,
-        processingTimeMs: processingTime,
-      });
-
-      if (error.code === "P2025") {
-        return NextResponse.json(
-          { error: "Interview not found" },
-          { status: 404 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: "Database error occurred" },
-        { status: 500 }
-      );
-    }
-
-    // Generic error
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("Delete Interview Error:", {
-      message: errorMessage,
-      processingTimeMs: processingTime,
+    const err = error as Error;
+    console.error("Delete Error:", err.message);
+    return new Response(JSON.stringify({ error: "Failed to delete interview" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
     });
-
-    return NextResponse.json(
-      { 
-        error: "Failed to delete interview",
-        details: process.env.NODE_ENV === "development" ? errorMessage : undefined,
-      },
-      { status: 500 }
-    );
   }
 }
 
-// ─── PATCH Handler (Optional - for partial updates) ───
+// ─── PATCH Handler ───
 export async function PATCH(
   req: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse> {
-  const requestStartTime = Date.now();
-
+): Promise<Response> {
   try {
-    // 1. Verify authentication
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized access" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // 2. Extract interview ID
     const { id: interviewId } = await params;
-
-    if (!interviewId) {
-      return NextResponse.json(
-        { error: "Interview ID is required" },
-        { status: 400 }
-      );
-    }
-
-    // 3. Parse update data
     const updateData = await req.json();
 
-    // 4. Validate update fields
-    const allowedFields = [
-      "jobPosition",
-      "jobDescription",
-      "duration",
-      "questions",
-      "type",
-    ];
+    const { jobPosition, duration, jobDescription } = updateData;
 
-    const sanitizedData: Record<string, any> = {};
-    for (const key of Object.keys(updateData)) {
-      if (allowedFields.includes(key)) {
-        sanitizedData[key] = updateData[key];
-      }
+    if (!jobPosition || !duration || !jobDescription) {
+      return new Response(JSON.stringify({ error: "Missing required fields" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    if (Object.keys(sanitizedData).length === 0) {
-      return NextResponse.json(
-        { error: "No valid fields to update" },
-        { status: 400 }
-      );
-    }
-
-    // 5. Update interview
     const updated = await prisma.interview.updateMany({
-      where: {
-        id: interviewId,
-        userEmail: session.user.email,
-      },
-      data: sanitizedData,
+      where: { id: interviewId, userEmail: session.user.email },
+      data: { jobPosition, duration, jobDescription },
     });
 
     if (updated.count === 0) {
-      return NextResponse.json(
-        { error: "Interview not found or unauthorized" },
-        { status: 404 }
-      );
+      return new Response(JSON.stringify({ error: "Interview not found or unauthorized" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const processingTime = Date.now() - requestStartTime;
-
-    logApiEvent("Interview updated successfully", {
-      interviewId,
-      updatedFields: Object.keys(sanitizedData),
-      processingTimeMs: processingTime,
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: "Interview updated successfully",
+    return new Response(JSON.stringify({ success: true, message: "Interview updated" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
 
   } catch (error: unknown) {
-    const processingTime = Date.now() - requestStartTime;
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    
-    console.error("Update Interview Error:", {
-      message: errorMessage,
-      processingTimeMs: processingTime,
+    const err = error as Error;
+    console.error("Update Error:", err.message);
+    return new Response(JSON.stringify({ error: "Failed to update interview" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
     });
-
-    return NextResponse.json(
-      { error: "Failed to update interview" },
-      { status: 500 }
-    );
   }
 }

@@ -287,6 +287,9 @@ function StartInterview(): React.ReactElement {
       if (isMountedRef.current) setLoading(false);
     }
   }, [interviewInfo, interview_id, router]);
+
+
+
   const startCall = useCallback((vapiInstance: any): void => {
     const langMap: Record<string, string> = { "en-US": "en-US", "hi-IN": "hi", "ur-PK": "multi" };
     const sysLang: Record<string, string> = {
@@ -295,18 +298,39 @@ function StartInterview(): React.ReactElement {
       "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
     };
 
+    // ✅ Language-specific transition prompts
+    const transitionPrompts: Record<string, string> = {
+      "en-US": "Thank you for your answer. Shall we move to the next question?",
+      "hi-IN": "आपके उत्तर के लिए धन्यवाद। क्या हम अगले प्रश्न की ओर बढ़ें?",
+      "ur-PK": "آپ کے جواب کا شکریہ۔ کیا ہم اگلے سوال کی طرف بڑھیں؟",
+    };
+
+    const repeatPrompts: Record<string, string> = {
+      "en-US": "Of course, let me repeat the question.",
+      "hi-IN": "बिल्कुल, मैं प्रश्न दोहराता हूं।",
+      "ur-PK": "بالکل، میں سوال دہراتا ہوں۔",
+    };
+
+    const endingPrompts: Record<string, string> = {
+      "en-US": "Thank you for completing the interview! Your responses have been recorded. Have a great day!",
+      "hi-IN": "साक्षात्कार पूरा करने के लिए धन्यवाद! आपके उत्तर रिकॉर्ड कर लिए गए हैं। आपका दिन शुभ हो!",
+      "ur-PK": "انٹرویو مکمل کرنے کا شکریہ! آپ کے جوابات ریکارڈ کر لیے گئے ہیں۔ آپ کا دن اچھا گزرے!",
+    };
+
     const ql: string = interviewInfo?.interviewData?.questions
       ?.map((q: Question, i: number) => `${i + 1}. ${q.question}`)
       .join("\n") || "";
 
-    // ✅ Get question names for progress display
-    const questionNames = interviewInfo?.interviewData?.questions?.map((q: Question) => q.question) || [];
-
+    // ✅ Welcome messages in all languages
     let welcome: string = `Hi ${interviewInfo?.userName}! Ready to start?`;
     if (config.language.startsWith("hi"))
       welcome = `नमस्ते ${interviewInfo?.userName}! क्या आप साक्षात्कार शुरू करने के लिए तैयार हैं?`;
     if (config.language.startsWith("ur"))
       welcome = `اسلام و علیکم ${interviewInfo?.userName}! کیا آپ انٹرویو کے لیے تیار ہیں؟`;
+
+    // ✅ Get the selected language code
+    const selectedLang = config.language.startsWith("hi") ? "hi-IN" :
+      config.language.startsWith("ur") ? "ur-PK" : "en-US";
 
     vapiInstance.start({
       name: "AI Recruiter",
@@ -325,52 +349,54 @@ function StartInterview(): React.ReactElement {
         model: "gpt-4o-mini",
         messages: [{
           role: "system",
-          content: `You are an AI recruiter. Conduct the interview in ${sysLang[config.language] || "English"}.
+          content: `You are an AI recruiter. Conduct the ENTIRE interview in ${sysLang[config.language] || "English"}.
 
 INTERVIEW QUESTIONS (ask one by one):
 ${ql}
 
 CRITICAL RULES - FOLLOW STRICTLY:
 
-1. ASKING QUESTIONS:
-   - Ask ONE question at a time.
+1. LANGUAGE RULE (MOST IMPORTANT):
+   - Speak ONLY in ${sysLang[config.language] || "English"} throughout the entire interview.
+   - NEVER switch to English or any other language.
+   - All questions, transitions, and responses must be in ${sysLang[config.language] || "English"}.
+
+2. ASKING QUESTIONS:
+   - Ask ONE question at a time in ${sysLang[config.language] || "English"}.
    - After asking a question, STOP TALKING COMPLETELY.
    - Give the candidate time to think and respond.
 
-2. SILENCE HANDLING (MOST IMPORTANT):
+3. SILENCE HANDLING:
    - Do NOT interrupt the candidate while they are speaking.
    - Wait for the candidate to finish their answer naturally.
-   - If the candidate is silent for AT LEAST 5-7 seconds, assume they have finished answering.
-   - After 5-7 seconds of silence, say "Thank you for your answer. Shall we move to the next question?"
-   - Wait for the candidate to say "yes", "sure", "okay", or similar confirmation.
-   - If they don't confirm, ask "Would you like me to repeat the question or shall we continue?"
+   - If the candidate is silent for AT LEAST 5-7 seconds, assume they have finished.
+   - After 5-7 seconds of silence, say EXACTLY: "${transitionPrompts[selectedLang]}"
+   - Wait for confirmation ("yes", "sure", "okay", "हां", "جی ہاں", etc.) before proceeding.
 
-3. REPEATING QUESTIONS:
-   - If the candidate says "repeat", "can you repeat", "repeat the question", or similar:
-     - Apologize briefly and repeat the EXACT same question word for word.
-     - Then wait for their answer again.
+4. REPEATING QUESTIONS:
+   - If the candidate asks to repeat, say: "${repeatPrompts[selectedLang]}"
+   - Then repeat the EXACT same question word for word.
+   - Wait for their answer again.
 
-4. CANDIDATE SPEAKING:
+5. CANDIDATE SPEAKING:
    - NEVER interrupt or talk over the candidate.
-   - If the candidate pauses briefly (1-3 seconds), WAIT - they might be thinking.
+   - If the candidate pauses briefly (1-3 seconds), WAIT.
    - Only consider silence of 5+ seconds as "finished answering".
 
-5. ENDING THE INTERVIEW:
-   - After the LAST question is answered, say:
-     "Thank you for completing the interview! Your responses have been recorded. Have a great day!"
+6. ENDING THE INTERVIEW:
+   - After the LAST question is answered, say EXACTLY: "${endingPrompts[selectedLang]}"
    - End the conversation.
 
-6. GENERAL BEHAVIOR:
+7. GENERAL BEHAVIOR:
    - Be professional, friendly, and encouraging.
    - Do NOT rush the candidate.
    - Do NOT ask multiple questions at once.
-   - Do NOT provide feedback or scores during the interview.
-   - Keep your responses concise and focused on the interview.`,
+   - Do NOT provide feedback or scores.
+   - Keep ALL responses in ${sysLang[config.language] || "English"}.`,
         }],
       },
     });
   }, [interviewInfo, config]);
-
 
   // ✅ Repeat question handler - Alternative approach
   const handleRepeatQuestion = useCallback((): void => {
@@ -453,7 +479,7 @@ CRITICAL RULES - FOLLOW STRICTLY:
       }
     });
 
-    // ✅ Track transcript messages
+    // ✅ Track transcript messages - with language awareness
     vapi.on("message", (msg: VapiMessage) => {
       if (msg?.conversation) {
         const c: string = JSON.stringify(msg.conversation);
@@ -526,7 +552,7 @@ CRITICAL RULES - FOLLOW STRICTLY:
         isCallActiveRef.current = false;
       }
     };
-  }, [interviewInfo, isPreCheckComplete,interview_id,router, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
+  }, [interviewInfo, isPreCheckComplete, interview_id, router, isConfigLoaded, hasInterviewStarted, totalQuestions, startCall, GenerateFeedback]);
   /* ─────────────────────────── RENDER ─────────────────────── */
   return (
     <>
