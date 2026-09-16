@@ -7,10 +7,8 @@ import { interviewFormSchema } from "@/lib/validations/interview";
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-70b-versatile",
-  "llama-3.1-8b-instant",
-  "qwen/qwen3-32b",
+  "openai/gpt-oss-120b",  // Best quality/reasoning replacement
+  "openai/gpt-oss-20b",   // Faster, cheaper fallback
 ];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
