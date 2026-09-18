@@ -25,11 +25,9 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 
 // ─── Updated Model List (removed decommissioned models) ───
 const GROQ_MODELS: string[] = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "qwen-2.5-32b",
-  "mixtral-8x7b-32768",
-  "gemma2-9b-it",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.6-27b",
 ];
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
