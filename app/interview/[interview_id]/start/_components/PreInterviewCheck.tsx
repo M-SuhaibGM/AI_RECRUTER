@@ -1,12 +1,14 @@
 // interview/[interview_id]/start/_components/PreInterviewCheck.tsx
 "use client";
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useContext } from "react";
 import {
-    Mic, MicOff, Video, VideoOff, CheckCircle2, AlertCircle,
-    RefreshCw, Clock, HelpCircle, Lightbulb, ChevronDown, ChevronUp,
-    Wifi, Shield, Sparkles, ArrowRight, Zap
+    Mic, MicOff, CheckCircle2, RefreshCw, Clock,
+    ChevronDown, ChevronUp, Wifi, Sparkles, MonitorSmartphone,
+    Lightbulb, HelpCircle, Shield
 } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter, useParams } from "next/navigation";
+import { InterviewDataContext } from "@/context/InterviewDataContext";
 
 // ─── Type Definitions ───
 interface PreInterviewCheckProps {
@@ -21,17 +23,17 @@ interface PreInterviewCheckProps {
 // ─── Constants ───
 const BAR_COUNT = 32;
 const INTERVIEW_TIPS = [
-    { icon: "🎯", title: "Be Concise", desc: "Give clear, structured answers. Aim for 1-2 minutes per question." },
-    { icon: "🎤", title: "Speak Clearly", desc: "Speak at a moderate pace. The AI transcribes your voice in real-time." },
-    { icon: "🏠", title: "Quiet Environment", desc: "Find a quiet space with minimal background noise and good lighting." },
-    { icon: "🔌", title: "Stable Connection", desc: "Use a wired internet connection if possible. Close other apps and tabs." },
+    { icon: "🎯", title: "Be Concise", desc: "Aim for 1-2 minutes per question." },
+    { icon: "🎤", title: "Speak Clearly", desc: "Moderate pace, clear pronunciation." },
+    { icon: "🏠", title: "Quiet Space", desc: "Minimal background noise." },
+    { icon: "🔌", title: "Stable Internet", desc: "Wired connection recommended." },
 ];
 
 // ─── Helper Functions ───
 function getBarColor(height: number): string {
     if (height > 0.7) return "#f87171";
-    if (height > 0.35) return "#34d399";
-    return "#60a5fa";
+    if (height > 0.35) return "#3b82f6";
+    return "#93c5fd";
 }
 
 function formatDuration(minutes: string | number | undefined): string {
@@ -43,20 +45,38 @@ function formatDuration(minutes: string | number | undefined): string {
 }
 
 // ─── Main Component ───
-export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewCheckProps): React.ReactElement {
+export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewCheckProps): React.ReactElement | null {
+    const router = useRouter();
+    const params = useParams<{ interview_id: string }>();
+    const { interviewInfo } = useContext(InterviewDataContext);
+
+    // ✅ Guard: If context is lost (page refreshed), redirect to interview entry form
+    useEffect(() => {
+        if (!interviewInfo?.userEmail || !interviewInfo?.userName) {
+            router.replace(`/interview/${params.interview_id}`);
+        }
+    }, [interviewInfo, router, params.interview_id]);
+
+    // ✅ Mobile device detection
+    const [isMobile, setIsMobile] = useState<boolean>(false);
+    const [checkedDevice, setCheckedDevice] = useState<boolean>(false);
+
+    useEffect(() => {
+        const ua = navigator.userAgent;
+        const isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+        const isSmallScreen = window.innerWidth < 1024;
+        setIsMobile(isMobileUA || isSmallScreen);
+        setCheckedDevice(true);
+    }, []);
+
     // Mic states
     const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "active" | "denied" | "ready">("idle");
     const [micVolume, setMicVolume] = useState<number>(0);
     const [micPeakDetected, setMicPeakDetected] = useState<boolean>(false);
     const [micBars, setMicBars] = useState<number[]>(Array(BAR_COUNT).fill(0.05));
 
-    // Camera states
-    const [camStatus, setCamStatus] = useState<"idle" | "requesting" | "active" | "denied" | "ready">("idle");
-    const [faceDetected, setFaceDetected] = useState<boolean>(false);
-    const [camError, setCamError] = useState<string>("");
-
     // UI states
-    const [showTips, setShowTips] = useState<boolean>(false);
+    const [activeTab, setActiveTab] = useState<"sample" | "tips">("sample");
     const [connectionQuality, setConnectionQuality] = useState<"good" | "fair" | "poor">("good");
 
     // Refs
@@ -64,29 +84,22 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
     const micAudioCtxRef = useRef<AudioContext | null>(null);
     const micAnalyserRef = useRef<AnalyserNode | null>(null);
     const micRafRef = useRef<number | null>(null);
-    const camStreamRef = useRef<MediaStream | null>(null);
-    const camIntervalRef = useRef<number | null>(null);
-    const camVideoRef = useRef<HTMLVideoElement>(null);
-    const camCanvasRef = useRef<HTMLCanvasElement>(null);
-    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const mountedRef = useRef<boolean>(true);
 
     const sampleQuestion = interviewData?.questions?.[0]?.question || "Tell me about your relevant experience for this role.";
 
     // ─── Cleanup ───
-    const stopAll = useCallback((): void => {
+    const stopMic = useCallback((): void => {
         if (micRafRef.current) { cancelAnimationFrame(micRafRef.current); micRafRef.current = null; }
         if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
         if (micAudioCtxRef.current?.state !== "closed") { micAudioCtxRef.current?.close().catch(() => { }); micAudioCtxRef.current = null; }
         micAnalyserRef.current = null;
-        if (camStreamRef.current) { camStreamRef.current.getTracks().forEach(t => t.stop()); camStreamRef.current = null; }
-        if (camIntervalRef.current) { clearInterval(camIntervalRef.current); camIntervalRef.current = null; }
     }, []);
 
     useEffect(() => {
         mountedRef.current = true;
-        return () => { mountedRef.current = false; stopAll(); };
-    }, [stopAll]);
+        return () => { mountedRef.current = false; stopMic(); };
+    }, [stopMic]);
 
     // ─── Connection Check ───
     useEffect(() => {
@@ -103,17 +116,17 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
         return () => clearInterval(interval);
     }, []);
 
-    // ─── Auto-proceed when both ready ───
+    // ─── Auto-proceed when mic ready ───
     useEffect(() => {
-        if (micStatus === "ready" && camStatus === "ready") {
+        if (micStatus === "ready") {
             const timer = setTimeout(() => onAllReady?.(), 1000);
             return () => clearTimeout(timer);
         }
-    }, [micStatus, camStatus, onAllReady]);
+    }, [micStatus, onAllReady]);
 
     // ─── Start Mic Test ───
     const startMicTest = useCallback(async (): Promise<void> => {
-        stopAll();
+        stopMic();
         setMicStatus("requesting");
         setMicPeakDetected(false);
         setMicVolume(0);
@@ -165,434 +178,325 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
         } catch {
             if (mountedRef.current) setMicStatus("denied");
         }
-    }, [stopAll]);
+    }, [stopMic]);
 
-    // ─── Start Camera Test (FIXED - Video display + face detection) ───
-    const startCamTest = useCallback(async (): Promise<void> => {
-        // Clean up previous stream
-        if (camStreamRef.current) {
-            camStreamRef.current.getTracks().forEach(t => t.stop());
-            camStreamRef.current = null;
-        }
-        if (camIntervalRef.current) {
-            clearInterval(camIntervalRef.current);
-            camIntervalRef.current = null;
-        }
+    // ─── Confirm Mic ───
+    const confirmMic = (): void => { setMicStatus("ready"); stopMic(); };
 
-        setCamStatus("requesting");
-        setCamError("");
-        setFaceDetected(false);
+    // ─── Loading state (still checking device) ───
+    if (!checkedDevice) return null;
 
-        try {
-            // ✅ Get camera stream
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
-                    facingMode: "user"
-                }
-            });
-
-            if (!mountedRef.current) {
-                stream.getTracks().forEach(t => t.stop());
-                return;
-            }
-
-            camStreamRef.current = stream;
-
-            // ✅ Set video source and force play
-            if (camVideoRef.current) {
-                const video = camVideoRef.current;
-                video.srcObject = stream;
-                video.muted = true;
-                video.playsInline = true;
-
-                // ✅ Force video to play (required for some browsers)
-                try {
-                    await video.play();
-                } catch (playErr) {
-                    toast.error("Camera auto-play failed. Please click on the video to start.");
-                }
-
-                // ✅ Wait for video to be ready
-                await new Promise<void>((resolve) => {
-                    if (video.readyState >= 2) {
-                        resolve();
-                    } else {
-                        video.onloadeddata = (): void => {
-                            resolve();
-                        };
-                        // Timeout fallback
-                        setTimeout(() => {
-                            resolve();
-                        }, 3000);
-                    }
-                });
-            }
-
-            setCamStatus("active");
-            toast.success("Camera is active");
-
-            // ✅ Simple face/feed detection
-            const checkFeed = (): void => {
-                const video = camVideoRef.current;
-                const canvas = camCanvasRef.current;
-
-                if (!video || !canvas || video.readyState < 2) {
-                    toast.error("Video not ready for face check");
-                    return;
-                }
-
-                // ✅ Update canvas size to match video
-                if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-                    canvas.width = video.videoWidth || 320;
-                    canvas.height = video.videoHeight || 240;
-                }
-
-                const ctx = canvas.getContext("2d", { willReadFrequently: true });
-                if (!ctx) return;
-
-                try {
-                    // Draw current video frame to canvas
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                    // ✅ Check multiple sample points across the frame
-                    let totalBrightness = 0;
-                    let samplesChecked = 0;
-
-                    // Check 5 different regions
-                    const regions = [
-                        { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },  // Center
-                        { x: 0.1, y: 0.1, w: 0.3, h: 0.3 },    // Top-left
-                        { x: 0.6, y: 0.1, w: 0.3, h: 0.3 },    // Top-right
-                        { x: 0.1, y: 0.6, w: 0.3, h: 0.3 },    // Bottom-left
-                        { x: 0.6, y: 0.6, w: 0.3, h: 0.3 },    // Bottom-right
-                    ];
-
-                    for (const region of regions) {
-                        const sx = Math.floor(canvas.width * region.x);
-                        const sy = Math.floor(canvas.height * region.y);
-                        const sw = Math.floor(canvas.width * region.w);
-                        const sh = Math.floor(canvas.height * region.h);
-
-                        if (sw <= 0 || sh <= 0) continue;
-
-                        const imageData = ctx.getImageData(sx, sy, sw, sh);
-
-                        let brightness = 0;
-                        for (let i = 0; i < imageData.data.length; i += 4) {
-                            brightness += (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
-                        }
-
-                        totalBrightness += brightness / (imageData.data.length / 4);
-                        samplesChecked++;
-                    }
-
-                    const avgBrightness = samplesChecked > 0 ? totalBrightness / samplesChecked : 0;
-
-                    // ✅ Very lenient: brightness > 5 means camera is working (not black screen)
-                    const isActive = avgBrightness > 5;
-                    if (mountedRef.current) {
-                        setFaceDetected(isActive);
-                    }
-                } catch (err) {
-                    toast.error("Face detection error.");
-                }
-            };
-
-            // ✅ Run first check after delay
-            setTimeout(() => {
-                checkFeed();
-                camIntervalRef.current = window.setInterval(checkFeed, 1500);
-            }, 1000);
-
-        } catch (err: any) {
-            toast.error("Camera access denied. Please check your permissions.");
-
-            if (err.name === "NotAllowedError") {
-                setCamError("Camera access denied. Please allow camera permissions.");
-            } else if (err.name === "NotFoundError") {
-                setCamError("No camera found on this device.");
-            } else {
-                setCamError(err.message || "Camera access denied");
-            }
-
-            if (mountedRef.current) setCamStatus("denied");
-        }
-    }, []);
-    // ─── Confirm Buttons ───
-    const confirmMic = (): void => { setMicStatus("ready"); stopAll(); };
-    const confirmCam = (): void => {
-        setCamStatus("ready");
-        if (camStreamRef.current) camStreamRef.current.getTracks().forEach(t => t.stop());
-    };
-
-    const bothReady = micStatus === "ready" && camStatus === "ready";
-
-    return (
-        <div className="w-full h-full flex flex-col relative" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-
-            {/* ── Top Bar: Timer + Connection (Fixed) ── */}
-            <div className="flex items-center justify-between px-4 py-2 shrink-0">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20">
-                    <Clock className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="text-xs text-blue-300">~{formatDuration(interviewData?.duration)}</span>
+    // ─── Mobile Block Screen ───
+    if (isMobile) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+                <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border border-blue-100">
+                    <div className="bg-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <MonitorSmartphone className="w-8 h-8 text-white" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-3">
+                        Desktop Required
+                    </h2>
+                    <p className="text-gray-500 mb-6 text-sm leading-relaxed">
+                        This interview requires a desktop or laptop computer for the best experience.
+                        Please open this link on a desktop device to continue.
+                    </p>
+                    <p className="text-xs text-gray-400">
+                        If you believe this is an error, try switching to desktop mode in your browser.
+                    </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Wifi className={`w-3.5 h-3.5 ${connectionQuality === "good" ? "text-green-400" : connectionQuality === "fair" ? "text-amber-400" : "text-red-400"}`} />
-                    <span className="text-[10px] text-slate-500">{connectionQuality.toUpperCase()}</span>
+            </div>
+        );
+    }
+
+    // ─── Main UI (Blue & White Theme, 100vh, 2-Column) ───
+    return (
+        <div
+            className="w-full h-full flex flex-col relative overflow-hidden"
+            style={{ fontFamily: "'DM Sans', sans-serif" }}
+        >
+            {/* ── Top Bar: Timer + Connection ── */}
+            <div className="flex items-center justify-between px-4 py-2 shrink-0">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100">
+                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                    <span className="text-xs text-blue-700 font-medium">
+                        ~{formatDuration(interviewData?.duration)}
+                    </span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200">
+                    <Wifi className={`w-3.5 h-3.5 ${
+                        connectionQuality === "good" ? "text-green-500" :
+                        connectionQuality === "fair" ? "text-amber-500" : "text-red-500"
+                    }`} />
+                    <span className="text-[10px] text-slate-500 font-medium">
+                        {connectionQuality.toUpperCase()}
+                    </span>
                 </div>
             </div>
 
-            {/* ── Scrollable Content ── */}
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 pb-4 space-y-3" style={{ scrollBehavior: "smooth" }}>
+            {/* ── 2-Column Grid Layout ── */}
+            <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 px-4 pb-4 min-h-0">
 
-                {/* ── Mic & Camera Cards ── */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-[400px] lg:min-h-[500px]">
+                {/* ══════════════ LEFT: MIC TEST CARD ══════════════ */}
+                <div className="relative rounded-3xl overflow-hidden flex flex-col min-h-0"
+                    style={{
+                        background: "linear-gradient(180deg, #eff6ff 0%, #ffffff 100%)",
+                        border: micStatus === "active" ? "2px solid rgba(37,99,235,0.4)" : "1px solid #e2e8f0",
+                        boxShadow: micStatus === "active"
+                            ? "0 20px 60px rgba(37,99,235,0.15), inset 0 1px 0 rgba(255,255,255,0.9)"
+                            : "0 8px 32px rgba(0,0,0,0.06)",
+                        transition: "all 0.4s ease",
+                    }}
+                >
+                    {micStatus === "active" && (
+                        <div className="absolute inset-0 bg-blue-500/5 animate-pulse pointer-events-none" />
+                    )}
 
-                    {/* ═══════════════ MIC CARD ═══════════════ */}
-                    <div className="relative rounded-3xl overflow-hidden flex flex-col min-h-[400px]" style={{
-                        background: "linear-gradient(180deg, rgba(37,99,235,0.1) 0%, rgba(15,23,42,0.6) 100%)",
-                        border: micStatus === "active" ? "2px solid rgba(96,165,250,0.5)" : "1px solid rgba(255,255,255,0.1)",
-                        boxShadow: micStatus === "active" ? "0 0 60px rgba(37,99,235,0.15), inset 0 1px 0 rgba(255,255,255,0.05)" : "inset 0 1px 0 rgba(255,255,255,0.03)",
-                    }}>
-                        {micStatus === "active" && (
-                            <div className="absolute inset-0 bg-blue-500/5 animate-pulse pointer-events-none" />
-                        )}
-
-                        <div className="flex-1 flex flex-col items-center justify-center p-6 relative z-10">
-                            <div className="relative mb-6">
-                                {micStatus === "active" && (
-                                    <>
-                                        <span className="absolute w-28 h-28 rounded-full border border-blue-500/30 animate-ping" style={{ animationDuration: "2s" }} />
-                                        <span className="absolute w-24 h-24 rounded-full border border-blue-400/20 animate-ping" style={{ animationDuration: "2.5s", animationDelay: "0.3s" }} />
-                                    </>
-                                )}
-                                <div className="relative w-20 h-20 rounded-2xl flex items-center justify-center transition-all duration-300"
-                                    style={{
-                                        background: micStatus === "denied" ? "linear-gradient(135deg,#7f1d1d,#991b1b)" :
-                                            micStatus === "ready" ? "linear-gradient(135deg,#065f46,#10b981)" :
-                                                "linear-gradient(135deg,#1d4ed8,#3b82f6)",
-                                        boxShadow: micStatus === "active" ? `0 0 ${Math.round(micVolume * 30)}px rgba(59,130,246,0.5)` : "0 8px 32px rgba(0,0,0,0.4)",
-                                    }}>
-                                    {micStatus === "requesting" && <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin" />}
-                                    {micStatus === "denied" && <MicOff className="w-9 h-9 text-white" />}
-                                    {micStatus === "ready" && <CheckCircle2 className="w-9 h-9 text-white" />}
-                                    {(micStatus === "idle" || micStatus === "active") && <Mic className="w-9 h-9 text-white" />}
-                                </div>
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 relative z-10">
+                        {/* Icon */}
+                        <div className="relative mb-4">
+                            {micStatus === "active" && (
+                                <>
+                                    <span className="absolute w-24 h-24 rounded-full border border-blue-400/30 animate-ping" style={{ animationDuration: "2s" }} />
+                                    <span className="absolute w-20 h-20 rounded-full border border-blue-300/20 animate-ping" style={{ animationDuration: "2.5s", animationDelay: "0.3s" }} />
+                                </>
+                            )}
+                            <div
+                                className="relative w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300"
+                                style={{
+                                    background:
+                                        micStatus === "denied" ? "linear-gradient(135deg,#dc2626,#ef4444)" :
+                                        micStatus === "ready" ? "linear-gradient(135deg,#059669,#10b981)" :
+                                        "linear-gradient(135deg,#1d4ed8,#3b82f6)",
+                                    boxShadow: micStatus === "active"
+                                        ? `0 0 ${Math.round(micVolume * 40)}px rgba(59,130,246,0.5)`
+                                        : "0 8px 32px rgba(37,99,235,0.25)",
+                                }}
+                            >
+                                {micStatus === "requesting" && <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />}
+                                {micStatus === "denied" && <MicOff className="w-7 h-7 text-white" />}
+                                {micStatus === "ready" && <CheckCircle2 className="w-7 h-7 text-white" />}
+                                {(micStatus === "idle" || micStatus === "active") && <Mic className="w-7 h-7 text-white" />}
                             </div>
+                        </div>
 
-                            <h2 className="text-xl font-bold text-white mb-2" style={{ fontFamily: "'Syne',sans-serif" }}>
-                                {micStatus === "ready" ? "Microphone Ready" : "Microphone Test"}
-                            </h2>
-                            <p className="text-xs text-slate-400 text-center mb-6 max-w-[250px]">
-                                {micStatus === "idle" && "Test your microphone before starting the interview."}
-                                {micStatus === "requesting" && "Allow microphone access in your browser."}
-                                {micStatus === "active" && (micPeakDetected ? "✓ We can hear you clearly!" : "Say something to test...")}
-                                {micStatus === "denied" && "Microphone blocked. Check browser permissions."}
-                                {micStatus === "ready" && "Your microphone is working perfectly!"}
-                            </p>
+                        {/* Title */}
+                        <h2 className="text-lg font-bold text-slate-900 mb-1" style={{ fontFamily: "'Syne',sans-serif" }}>
+                            {micStatus === "ready" ? "Microphone Ready" : "Microphone Test"}
+                        </h2>
+                        <p className="text-[11px] text-slate-500 text-center mb-4 max-w-[280px]">
+                            {micStatus === "idle" && "Test your microphone before starting."}
+                            {micStatus === "requesting" && "Allow microphone access in your browser."}
+                            {micStatus === "active" && (micPeakDetected ? "✓ We can hear you clearly!" : "Say something to test...")}
+                            {micStatus === "denied" && "Microphone blocked. Check permissions."}
+                            {micStatus === "ready" && "Your microphone is working perfectly!"}
+                        </p>
 
-                            <div className="w-full max-w-md h-20 flex items-end justify-center gap-[3px] rounded-2xl p-3 mb-4"
-                                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                                {micBars.map((h, i) => (
-                                    <div key={i} className="rounded-full flex-1 transition-all" style={{
+                        {/* Waveform */}
+                        <div
+                            className="w-full max-w-md h-20 flex items-end justify-center gap-[3px] rounded-2xl p-3 mb-3"
+                            style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
+                        >
+                            {micBars.map((h, i) => (
+                                <div
+                                    key={i}
+                                    className="rounded-full flex-1 transition-all"
+                                    style={{
                                         height: `${Math.max(4, h * 100)}%`,
-                                        background: micStatus === "active" ? getBarColor(h) : "rgba(255,255,255,0.06)",
+                                        background: micStatus === "active" ? getBarColor(h) : "#cbd5e1",
                                         maxWidth: 6,
                                         transition: "height 0.04s ease",
-                                    }} />
-                                ))}
-                            </div>
-
-                            {micStatus === "active" && (
-                                <div className="w-full max-w-md space-y-1 mb-4">
-                                    <div className="flex justify-between text-[10px] text-slate-500">
-                                        <span>Input Level</span>
-                                        <span className="font-mono">{Math.round(micVolume * 100)}%</span>
-                                    </div>
-                                    <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-                                        <div className="h-full rounded-full transition-all" style={{
-                                            width: `${micVolume * 100}%`,
-                                            background: micVolume > 0.7 ? "#f87171" : micVolume > 0.35 ? "#34d399" : "#3b82f6",
-                                        }} />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* ✅ Bottom Button - Now properly accessible */}
-                        <div className="p-4 relative z-10 shrink-0">
-                            {(micStatus === "idle" || micStatus === "denied") && (
-                                <button onClick={startMicTest} type="button"
-                                    className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 hover:brightness-110"
-                                    style={{ background: micStatus === "denied" ? "linear-gradient(135deg,#dc2626,#ef4444)" : "linear-gradient(135deg,#1d4ed8,#3b82f6)", color: "#fff" }}>
-                                    {micStatus === "denied" ? <><RefreshCw className="w-4 h-4" /> Retry Microphone</> : <><Mic className="w-4 h-4" /> Test Microphone</>}
-                                </button>
-                            )}
-                            {micStatus === "active" && (
-                                <button onClick={confirmMic} disabled={!micPeakDetected} type="button"
-                                    className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-30 hover:brightness-110"
-                                    style={{ background: micPeakDetected ? "linear-gradient(135deg,#065f46,#10b981)" : "rgba(255,255,255,0.06)", color: "#fff" }}>
-                                    <CheckCircle2 className="w-4 h-4" />
-                                    {micPeakDetected ? "Confirm Microphone" : "Speak to enable"}
-                                </button>
-                            )}
-                            {micStatus === "ready" && (
-                                <div className="w-full py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2"
-                                    style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
-                                    <CheckCircle2 className="w-4 h-4" /> Microphone Verified ✓
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* ═══════════════ CAMERA CARD (FIXED) ═══════════════ */}
-                    <div className="relative rounded-3xl overflow-hidden flex flex-col min-h-[400px]" style={{
-                        background: "linear-gradient(180deg, rgba(99,102,241,0.1) 0%, rgba(15,23,42,0.6) 100%)",
-                        border: camStatus === "active" ? "2px solid rgba(129,140,248,0.5)" : "1px solid rgba(255,255,255,0.1)",
-                        boxShadow: camStatus === "active" ? "0 0 60px rgba(99,102,241,0.15), inset 0 1px 0 rgba(255,255,255,0.05)" : "inset 0 1px 0 rgba(255,255,255,0.03)",
-                    }}>
-                        <div className="flex-1 flex flex-col items-center justify-center p-6 relative z-10">
-                            <div className="relative mb-4">
-                                {camStatus === "active" && (
-                                    <>
-                                        <span className="absolute w-28 h-28 rounded-full border border-indigo-500/30 animate-ping" style={{ animationDuration: "2s" }} />
-                                        <span className="absolute w-24 h-24 rounded-full border border-indigo-400/20 animate-ping" style={{ animationDuration: "2.5s", animationDelay: "0.3s" }} />
-                                    </>
-                                )}
-                                <div className="relative w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300"
-                                    style={{
-                                        background: camStatus === "denied" ? "linear-gradient(135deg,#7f1d1d,#991b1b)" :
-                                            camStatus === "ready" ? "linear-gradient(135deg,#065f46,#10b981)" :
-                                                "linear-gradient(135deg,#4f46e5,#6366f1)",
-                                        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-                                    }}>
-                                    {camStatus === "requesting" && <div className="w-7 h-7 border-3 border-white border-t-transparent rounded-full animate-spin" />}
-                                    {camStatus === "denied" && <VideoOff className="w-8 h-8 text-white" />}
-                                    {camStatus === "ready" && <CheckCircle2 className="w-8 h-8 text-white" />}
-                                    {(camStatus === "idle" || camStatus === "active") && <Video className="w-8 h-8 text-white" />}
-                                </div>
-                            </div>
-
-                            <h2 className="text-lg font-bold text-white mb-1" style={{ fontFamily: "'Syne',sans-serif" }}>
-                                {camStatus === "ready" ? "Camera Ready" : "Camera Test"}
-                            </h2>
-                            <p className="text-[11px] text-slate-400 text-center mb-4 max-w-[250px]">
-                                {camStatus === "idle" && "Enable camera for presence detection."}
-                                {camStatus === "requesting" && "Allow camera access in your browser."}
-                                {camStatus === "active" && (faceDetected ? "✓ Face detected!" : "Position your face in view...")}
-                                {camStatus === "denied" && "Camera blocked. Check browser permissions."}
-                                {camStatus === "ready" && "Your camera is working perfectly!"}
-                            </p>
-
-                            {/* ✅ Camera Preview - Simplified & Guaranteed to show */}
-                            <div className="relative w-full max-w-[280px] aspect-[4/3] rounded-2xl overflow-hidden mb-4 border-2 border-slate-600"
-                                style={{ background: "#111" }}>
-
-                                {/* ✅ Video element - Always rendered when active */}
-                                <video
-                                    ref={camVideoRef}
-                                    autoPlay
-                                    muted
-                                    playsInline
-                                    className="absolute inset-0 w-full h-full"
-                                    style={{
-                                        objectFit: "cover",
-                                        transform: "scaleX(-1)", // Mirror effect inline
-                                        display: camStatus === "active" ? "block" : "none"
                                     }}
                                 />
-
-                                {/* Canvas for face detection (hidden) */}
-                                <canvas ref={camCanvasRef} className="hidden" />
-
-                                {/* Placeholder when camera is off */}
-                                {camStatus !== "active" && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                                        <VideoOff className="w-10 h-10 text-slate-600" />
-                                        <p className="text-[10px] text-slate-500">Camera preview</p>
-                                    </div>
-                                )}
-
-                                {/* Face detection badge */}
-                                {camStatus === "active" && (
-                                    <div className="absolute bottom-2 left-2 right-2 z-10">
-                                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${faceDetected ? "bg-green-500/90 text-white" : "bg-red-500/90 text-white animate-pulse"
-                                            }`}>
-                                            {faceDetected ? "✓ Face Detected" : "⚠ No Face"}
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
+                            ))}
                         </div>
 
-                        {/* Bottom Button */}
-                        <div className="p-4 relative z-10 shrink-0">
-                            {(camStatus === "idle" || camStatus === "denied") && (
-                                <button onClick={startCamTest} type="button"
-                                    className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95"
-                                    style={{ background: camStatus === "denied" ? "linear-gradient(135deg,#dc2626,#ef4444)" : "linear-gradient(135deg,#4f46e5,#6366f1)", color: "#fff" }}>
-                                    {camStatus === "denied" ? <><RefreshCw className="w-4 h-4" /> Retry Camera</> : <><Video className="w-4 h-4" /> Test Camera</>}
-                                </button>
-                            )}
-                            {camStatus === "active" && (
-                                <button onClick={confirmCam} disabled={!faceDetected} type="button"
-                                    className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-30"
-                                    style={{ background: faceDetected ? "linear-gradient(135deg,#065f46,#10b981)" : "rgba(255,255,255,0.06)", color: "#fff" }}>
-                                    <CheckCircle2 className="w-4 h-4" />
-                                    {faceDetected ? "Confirm Camera" : "Face not detected"}
-                                </button>
-                            )}
-                            {camStatus === "ready" && (
-                                <div className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2"
-                                    style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
-                                    <CheckCircle2 className="w-4 h-4" /> Camera Verified ✓
+                        {/* Volume Level */}
+                        {micStatus === "active" && (
+                            <div className="w-full max-w-md space-y-1">
+                                <div className="flex justify-between text-[10px] text-slate-500">
+                                    <span>Input Level</span>
+                                    <span className="font-mono">{Math.round(micVolume * 100)}%</span>
                                 </div>
-                            )}
-                        </div>
+                                <div className="h-1.5 rounded-full overflow-hidden bg-slate-100">
+                                    <div
+                                        className="h-full rounded-full transition-all"
+                                        style={{
+                                            width: `${micVolume * 100}%`,
+                                            background: micVolume > 0.7 ? "#ef4444" : micVolume > 0.35 ? "#3b82f6" : "#93c5fd",
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Bottom Button */}
+                    <div className="p-4 relative z-10 shrink-0">
+                        {(micStatus === "idle" || micStatus === "denied") && (
+                            <button
+                                onClick={startMicTest}
+                                type="button"
+                                className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 hover:shadow-lg"
+                                style={{
+                                    background: micStatus === "denied"
+                                        ? "linear-gradient(135deg,#dc2626,#ef4444)"
+                                        : "linear-gradient(135deg,#1d4ed8,#3b82f6)",
+                                    color: "#fff",
+                                    boxShadow: "0 4px 20px rgba(37,99,235,0.3)",
+                                }}
+                            >
+                                {micStatus === "denied" ? (
+                                    <><RefreshCw className="w-4 h-4" /> Retry Microphone</>
+                                ) : (
+                                    <><Mic className="w-4 h-4" /> Test Microphone</>
+                                )}
+                            </button>
+                        )}
+                        {micStatus === "active" && (
+                            <button
+                                onClick={confirmMic}
+                                disabled={!micPeakDetected}
+                                type="button"
+                                className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                                style={{
+                                    background: micPeakDetected
+                                        ? "linear-gradient(135deg,#059669,#10b981)"
+                                        : "#e2e8f0",
+                                    color: micPeakDetected ? "#fff" : "#94a3b8",
+                                }}
+                            >
+                                <CheckCircle2 className="w-4 h-4" />
+                                {micPeakDetected ? "Confirm Microphone" : "Speak to enable"}
+                            </button>
+                        )}
+                        {micStatus === "ready" && (
+                            <div
+                                className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2"
+                                style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0" }}
+                            >
+                                <CheckCircle2 className="w-4 h-4" /> Microphone Verified ✓
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* ── Bottom: Tips + Sample Question ── */}
-                <div className="space-y-2 shrink-0">
-                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer"
-                        style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)" }}
-                        onClick={() => setShowTips(!showTips)}>
-                        <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <p className="text-xs text-amber-300 truncate">
-                            <span className="font-bold">Sample:</span> &quot;{sampleQuestion}&quot;
-                        </p>
-                        {showTips ? <ChevronUp className="w-3.5 h-3.5 text-amber-400 ml-auto shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-amber-400 ml-auto shrink-0" />}
+                {/* ══════════════ RIGHT: SAMPLE QUESTION + TIPS ══════════════ */}
+                <div className="flex flex-col gap-3 min-h-0">
+
+                    {/* Tabs */}
+                    <div className="flex gap-2 shrink-0">
+                        <button
+                            onClick={() => setActiveTab("sample")}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                                activeTab === "sample"
+                                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                            }`}
+                        >
+                            <HelpCircle className="w-3.5 h-3.5" />
+                            Sample Question
+                        </button>
+                        <button
+                            onClick={() => setActiveTab("tips")}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                                activeTab === "tips"
+                                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                            }`}
+                        >
+                            <Lightbulb className="w-3.5 h-3.5" />
+                            Interview Tips
+                        </button>
                     </div>
 
-                    {showTips && (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                            {INTERVIEW_TIPS.map((tip, i) => (
-                                <div key={i} className="flex items-start gap-2 p-2.5 rounded-xl" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                    <span className="text-base shrink-0">{tip.icon}</span>
+                    {/* Content Panel */}
+                    <div
+                        className="flex-1 rounded-3xl p-6 overflow-y-auto min-h-0"
+                        style={{
+                            background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+                            border: "1px solid #e2e8f0",
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.06)",
+                        }}
+                    >
+                        {/* ── Sample Question Tab ── */}
+                        {activeTab === "sample" && (
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                                        <HelpCircle className="w-4 h-4 text-blue-600" />
+                                    </div>
                                     <div>
-                                        <p className="text-[11px] font-bold text-slate-300">{tip.title}</p>
-                                        <p className="text-[9px] text-slate-500">{tip.desc}</p>
+                                        <h3 className="text-sm font-bold text-slate-900">Sample Question</h3>
+                                        <p className="text-[10px] text-slate-500">Here's an example of what to expect</p>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                    )}
+
+                                <div className="p-5 rounded-2xl bg-blue-50/60 border border-blue-100">
+                                    <p className="text-sm text-slate-700 leading-relaxed italic">
+                                        &ldquo;{sampleQuestion}&rdquo;
+                                    </p>
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                                        <span className="font-bold text-slate-700">💡 Tip:</span> Take a moment to structure
+                                        your answer using the STAR method (Situation, Task, Action, Result) for clarity.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── Interview Tips Tab ── */}
+                        {activeTab === "tips" && (
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
+                                        <Lightbulb className="w-4 h-4 text-amber-600" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-slate-900">Interview Tips</h3>
+                                        <p className="text-[10px] text-slate-500">Best practices for success</p>
+                                    </div>
+                                </div>
+
+                                {INTERVIEW_TIPS.map((tip, i) => (
+                                    <div
+                                        key={i}
+                                        className="flex items-start gap-3 p-3 rounded-xl bg-white border border-slate-100 hover:border-blue-200 transition-all"
+                                    >
+                                        <span className="text-lg shrink-0">{tip.icon}</span>
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-bold text-slate-700">{tip.title}</p>
+                                            <p className="text-[10px] text-slate-500 leading-snug">{tip.desc}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Security Notice */}
+                    <div className="shrink-0 p-3 rounded-xl bg-blue-50 border border-blue-100 flex items-center gap-2">
+                        <Shield className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <p className="text-[10px] text-blue-700 font-medium">
+                            Your interview is secure and monitored for integrity.
+                        </p>
+                    </div>
                 </div>
             </div>
 
             {/* ─── Ready State Overlay ─── */}
-            {bothReady && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            {micStatus === "ready" && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-md">
                     <div className="text-center space-y-4">
-                        <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center mx-auto animate-bounce">
+                        <div className="w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center mx-auto animate-bounce shadow-lg shadow-blue-300">
                             <CheckCircle2 className="w-10 h-10 text-white" />
                         </div>
-                        <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "'Syne',sans-serif" }}>
+                        <h2 className="text-2xl font-bold text-slate-900" style={{ fontFamily: "'Syne',sans-serif" }}>
                             All Set!
                         </h2>
-                        <p className="text-slate-300">Starting your interview...</p>
+                        <p className="text-slate-500">Starting your interview...</p>
                     </div>
                 </div>
             )}
