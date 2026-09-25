@@ -129,29 +129,48 @@ export function useInterviewVapi({
       .catch(() => {});
   }, []);
 
-  /* ─── Question index calculation ─── */
+  /* ─── Question index — ACCURATE with turn merging ─── */
   const currentQuestionIndex: number = useMemo(() => {
     if (!conversation) return 0;
     try {
       const logs: ConversationMessage[] = JSON.parse(conversation);
-      let responseCount = 0;
-      let lastUserContent = "";
+      if (!Array.isArray(logs)) return 0;
 
+      // ✅ STEP 1: Merge consecutive user turns into single answers
+      const mergedLogs: ConversationMessage[] = [];
       for (const msg of logs) {
-        if (msg.role === "user") {
-          const content = (msg.content || msg.message || "").trim();
-          const isRealResponse = content.length > 30 &&
-            !["yes", "no", "repeat", "ok", "okay", "sure", "yeah", "ready",
-              "repeat the question", "can you repeat"].includes(content.toLowerCase());
-
-          if (isRealResponse && content !== lastUserContent) {
-            responseCount++;
-            lastUserContent = content;
-          }
+        const last = mergedLogs[mergedLogs.length - 1];
+        if (last && last.role === "user" && msg.role === "user") {
+          last.content = (last.content || "") + " " + (msg.content || msg.message || "");
+        } else {
+          mergedLogs.push({ ...msg });
         }
       }
-      return Math.min(responseCount, totalQuestions);
-    } catch { return 0; }
+
+      // ✅ STEP 2: Count AI responses that followed a substantial user answer
+      let questionsAsked = 0;
+      for (let i = 1; i < mergedLogs.length; i++) {
+        const prev = mergedLogs[i - 1];
+        const curr = mergedLogs[i];
+
+        const isAI = curr.role === "assistant" || curr.role === "bot";
+        const prevWasUser = prev.role === "user";
+        const userAnswer = (prev.content || prev.message || "").trim();
+        const isSubstantial = userAnswer.length > 15;
+
+        if (isAI && prevWasUser && isSubstantial) {
+          questionsAsked++;
+        }
+      }
+
+      const hasAI = mergedLogs.some((m) => m.role === "assistant" || m.role === "bot");
+      if (hasAI && questionsAsked === 0) questionsAsked = 1;
+
+      const currentIdx = Math.max(0, Math.min(questionsAsked - 1, totalQuestions - 1));
+      return currentIdx;
+    } catch {
+      return 0;
+    }
   }, [conversation, totalQuestions]);
 
   /* ─── Progress percentage ─── */
@@ -273,19 +292,22 @@ CRITICAL RULES - FOLLOW STRICTLY:
    - After 5-7 seconds of silence, say EXACTLY: "${transitionPrompts[langCode]}"
    - Wait for confirmation before proceeding.
 
-4. REPEATING QUESTIONS:
+4. MOVING TO NEXT QUESTION:
+   - If the candidate says "next", "move on", "skip", "next question", or "Yes, please move to the next question", immediately proceed to the next question WITHOUT further confirmation.
+
+5. REPEATING QUESTIONS:
    - If the candidate asks to repeat, say: "${repeatPrompts[langCode]}"
    - Then repeat the EXACT same question word for word.
 
-5. CANDIDATE SPEAKING:
+6. CANDIDATE SPEAKING:
    - NEVER interrupt or talk over the candidate.
    - Only consider silence of 5+ seconds as "finished answering".
 
-6. ENDING THE INTERVIEW:
+7. ENDING THE INTERVIEW:
    - After the LAST question is answered, say EXACTLY: "${endingPrompts[langCode]}"
    - End the conversation.
 
-7. GENERAL BEHAVIOR:
+8. GENERAL BEHAVIOR:
    - Be professional, friendly, and encouraging.
    - Do NOT rush the candidate.
    - Do NOT ask multiple questions at once.`;
@@ -293,7 +315,11 @@ CRITICAL RULES - FOLLOW STRICTLY:
 
   /* ─── Start Vapi call ─── */
   const startCall = useCallback((vapiInstance: any): void => {
-    const langMap: Record<string, string> = { "en-US": "en-US", "hi-IN": "hi", "ur-PK": "multi" };
+    const langMap: Record<string, string> = {
+      "en-US": "en-US",
+      "hi-IN": "hi",
+      "ur-PK": "ur",   // ✅ Fixed: "multi" → "ur"
+    };
     const langCode = config.language.startsWith("hi") ? "hi-IN"
       : config.language.startsWith("ur") ? "ur-PK" : "en-US";
 
@@ -418,17 +444,41 @@ CRITICAL RULES - FOLLOW STRICTLY:
     });
 
     vapi.on("error", (err: VapiError) => {
+      // ✅ Robust error filtering
+      const errType = err?.error?.type || "";
+      const errMsg = err?.error?.msg || err?.errorMsg || "";
+      const topLevelType = err?.type || "";
+
+      const isStartupNoise =
+        !isCallActiveRef.current &&
+        !hasGreetedRef.current;
+
       const isNormalEnd =
-        err?.error?.type === "ejected" ||
-        err?.error?.msg === "Meeting has ended" ||
-        err?.errorMsg === "Meeting has ended" ||
-        err?.error?.type === "no-room";
+        errType === "ejected" ||
+        errType === "no-room" ||
+        errMsg === "Meeting has ended" ||
+        errMsg.toLowerCase().includes("meeting has ended") ||
+        errMsg.toLowerCase().includes("ejected");
 
-      if (isNormalEnd) return;
-      if (err?.type === "daily-error" && !isCallActiveRef.current) return;
+      const isDailyStartupError =
+        topLevelType === "daily-error" && !isCallActiveRef.current;
 
-      if (isMountedRef.current) {
-        toast.error("Connection error — check your internet.");
+      if (isNormalEnd) {
+        console.log("ℹ️ Ignoring normal-end error:", errMsg);
+        return;
+      }
+      if (isDailyStartupError) {
+        console.log("ℹ️ Ignoring daily startup error");
+        return;
+      }
+      if (isStartupNoise) {
+        console.log("ℹ️ Ignoring startup noise:", errType, errMsg);
+        return;
+      }
+
+      console.error("❌ Real Vapi error:", err);
+      if (isMountedRef.current && isCallActiveRef.current) {
+        toast.error("Connection lost — check your internet.");
         router.replace(`/interview/${interviewId}/completed`);
       }
     });
@@ -464,6 +514,24 @@ CRITICAL RULES - FOLLOW STRICTLY:
     }
   }, []);
 
+  /* ─── Next question handler ✅ NEW ─── */
+  const handleNextQuestion = useCallback((): void => {
+    if (vapiRef.current && isCallActiveRef.current) {
+      try {
+        vapiRef.current.send({
+          type: "add-message",
+          message: {
+            role: "user",
+            content: "Yes, please move to the next question.",
+          },
+        });
+        toast.success("Moving to next question...");
+      } catch {
+        toast.error("Failed to skip question.");
+      }
+    }
+  }, []);
+
   /* ─── Stop interview handler ─── */
   const handleStop = useCallback((): void => {
     if (vapiRef.current && isCallActiveRef.current) {
@@ -487,6 +555,7 @@ CRITICAL RULES - FOLLOW STRICTLY:
     conversation,
     // Actions
     handleRepeatQuestion,
+    handleNextQuestion,      // ✅ NEW
     handleStop,
     syncAntiCheatRefs,
   };

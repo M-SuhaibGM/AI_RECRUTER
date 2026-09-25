@@ -2,8 +2,7 @@ import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { Prisma } from "@prisma/client";
+import { authOptions } from "@/lib/auth"
 
 // ─── Type Definitions ───
 interface InterviewListItem {
@@ -25,10 +24,6 @@ interface ErrorResponse {
   details?: string;
 }
 
-// ─── Helper Functions ───
-function logFetchEvent(event: string, details: Record<string, any>): void {
-  const timestamp = new Date().toISOString();
-}
 
 // ─── GET Handler ───
 export async function GET(
@@ -49,7 +44,7 @@ export async function GET(
 
     const userEmail = session.user.email;
 
-    logFetchEvent("Fetching interviews", { userEmail });
+    // logFetchEvent("Fetching interviews", { userEmail });
 
     // 2. Fetch interviews from database
     const interviews: InterviewListItem[] = await prisma.interview.findMany({
@@ -72,18 +67,7 @@ export async function GET(
       },
     });
 
-    const processingTime = Date.now() - requestStartTime;
-
-    logFetchEvent("Interviews fetched successfully", {
-      userEmail,
-      totalInterviews: interviews.length,
-      totalCandidates: interviews.reduce(
-        (sum, interview) => sum + (interview._count?.candidates || 0),
-        0
-      ),
-      processingTimeMs: processingTime,
-    });
-
+  
     // 3. Return interviews
     return NextResponse.json(interviews);
 

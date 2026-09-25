@@ -67,21 +67,30 @@ export function InterviewHeader({
         <div className="hidden md:flex items-center gap-3">
           <div className="text-right">
             <span className="text-[9px] text-slate-500 uppercase tracking-widest block">
-              Question {currentQuestionIndex}/{totalQuestions}
+              Question {currentQuestionIndex + 1}/{totalQuestions}
             </span>
             <span className="text-[11px] text-blue-400 font-bold truncate max-w-[200px] block">
               {currentQuestionName}
             </span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {Array.from({ length: totalQuestions }).map((_, i: number) => (
               <div
                 key={i}
-                className="h-1.5 w-6 rounded-full transition-all duration-500"
+                className="rounded-full transition-all duration-500"
                 style={{
-                  background: i < currentQuestionIndex
+                  // ✅ Bolder, bigger dots with glow
+                  height: i < currentQuestionIndex + 1 ? 8 : 6,
+                  width: i < currentQuestionIndex + 1 ? 28 : 22,
+                  background: i < currentQuestionIndex + 1
                     ? "linear-gradient(90deg,#3b82f6,#60a5fa)"
-                    : "rgba(255,255,255,.08)",
+                    : "rgba(255,255,255,.12)",
+                  boxShadow: i < currentQuestionIndex + 1
+                    ? "0 0 10px rgba(96,165,250,.7), 0 0 20px rgba(59,130,246,.3)"
+                    : "none",
+                  border: i < currentQuestionIndex + 1
+                    ? "1px solid rgba(96,165,250,.4)"
+                    : "1px solid rgba(255,255,255,.06)",
                 }}
               />
             ))}

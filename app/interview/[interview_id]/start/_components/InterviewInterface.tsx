@@ -1,48 +1,158 @@
+// interview/[interview_id]/start/_components/InterviewInterface.tsx
 "use client";
 import React, { useEffect, useState, useRef } from "react";
-import Image from "next/image";
-import { Mic, MicOff, Brain, Zap, RefreshCw, MessageSquare, Camera, CameraOff } from "lucide-react";
-import { STYLESs as STYLES } from "@/services/Constants";
+import { Brain, Zap, RefreshCw, MessageSquare, Mic, MicOff, Bot, User, ArrowRight } from "lucide-react";
 
 // ─── Type Definitions ───
-interface WaveBarsProps { color?: string; }
+interface ChatMessage {
+  role: "ai" | "user";
+  text: string;
+  timestamp: number;
+}
+
 interface InterviewInterfaceProps {
-  interviewInfo: { userName?: string; userEmail?: string; interviewData?: any; } | undefined;
+  interviewInfo: {
+    userName?: string;
+    userEmail?: string;
+    interviewData?: any;
+  } | undefined;
   currentQuestionIndex: number;
   totalQuestions: number;
   activeUser: boolean;
   aiIsSpeaking?: boolean;
   candidateIsThinking?: boolean;
   transcript?: string;
+  conversation?: string;
   currentQuestionName?: string;
   onRepeatQuestion?: () => void;
+  onNextQuestion?: () => void;   // ✅ NEW
 }
-type AIStatus = "standby" | "speaking" | "thinking";
 
-// ─── Wave Bars Component ───
-function WaveBars({ color = "#60a5fa" }: WaveBarsProps): React.ReactElement {
+// ═══════════════════════════════════════════════════════════════
+// 🎯 RADIAL BARS (Google Assistant style - circular bars)
+// ═══════════════════════════════════════════════════════════════
+interface RadialBarsProps {
+  isSpeaking: boolean;
+  isThinking: boolean;
+  volume?: number;
+}
+
+function RadialBars({ isSpeaking, isThinking, volume = 0 }: RadialBarsProps): React.ReactElement {
+  const [barHeights, setBarHeights] = useState<number[]>(Array(48).fill(0.15));
+  const animRef = useRef<number | null>(null);
+  const phaseRef = useRef<number>(0);
+
+  useEffect(() => {
+    const animate = () => {
+      const time = Date.now() / 1000;
+      const intensity = isSpeaking ? Math.max(0.5, volume * 2.5) : isThinking ? 0.35 : 0.15;
+
+      setBarHeights((prev) =>
+        prev.map((_, i) => {
+          const angle = (i / 48) * Math.PI * 2;
+          // Multi-frequency wave for organic feel
+          const wave1 = Math.sin(angle * 3 + time * 2.5) * 0.5 + 0.5;
+          const wave2 = Math.sin(angle * 5 - time * 1.8) * 0.3 + 0.5;
+          const wave3 = Math.cos(angle * 7 + time * 3.2) * 0.2 + 0.5;
+
+          const combined = (wave1 * 0.5 + wave2 * 0.3 + wave3 * 0.2) * intensity;
+          return Math.max(0.15, Math.min(1, combined));
+        })
+      );
+
+      phaseRef.current += 0.02;
+      animRef.current = requestAnimationFrame(animate);
+    };
+
+    animRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+    };
+  }, [isSpeaking, isThinking, volume]);
+
+  const SIZE = 320;
+  const CENTER = SIZE / 2;
+  const INNER_RADIUS = 70;
+  const MAX_BAR_LENGTH = 55;
+
   return (
-    <div className="flex items-end gap-0.75 h-5">
-      {[...Array(5)].map((_: unknown, i: number) => (
-        <div key={i} className="wave-bar w-0.75 rounded-full"
-          style={{ height: "100%", background: color, animationDelay: `${i * 0.1}s` }} />
-      ))}
+    <div className="relative flex items-center justify-center" style={{ width: SIZE, height: SIZE }}>
+      {/* Radial bars container */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {barHeights.map((height, i) => {
+          const angle = (i / barHeights.length) * 360;
+          const barLength = 8 + height * MAX_BAR_LENGTH;
+          const distance = INNER_RADIUS + barLength / 2;
+
+          // Color based on state
+          const color = isSpeaking
+            ? `rgba(59, 130, 246, ${0.5 + height * 0.5})`
+            : isThinking
+              ? `rgba(99, 102, 241, ${0.4 + height * 0.4})`
+              : `rgba(148, 163, 184, ${0.3 + height * 0.3})`;
+
+          return (
+            <div
+              key={i}
+              className="absolute rounded-full transition-all"
+              style={{
+                width: 3,
+                height: barLength,
+                background: color,
+                transform: `rotate(${angle}deg) translateY(-${distance}px)`,
+                transformOrigin: "center center",
+                top: "50%",
+                left: "50%",
+                marginLeft: -1.5,
+                marginTop: -barLength / 2,
+                transition: "height 0.1s ease, background 0.2s ease",
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Center AI icon */}
+      <div
+        className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-500 ${isSpeaking
+          ? "bg-linear-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-400/50"
+          : isThinking
+            ? "bg-linear-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-400/50"
+            : "bg-linear-to-br from-slate-300 to-slate-400 shadow-md"
+          }`}
+      >
+        <Brain className="w-8 h-8 text-white" />
+        {isSpeaking && (
+          <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-green-500 border-2 border-white flex items-center justify-center">
+            <Zap className="w-2.5 h-2.5 text-white" />
+          </div>
+        )}
+        {isThinking && (
+          <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-500 border-2 border-white flex items-center justify-center animate-pulse">
+            <div className="w-1.5 h-1.5 rounded-full bg-white" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── Thinking Dots Component ───
+// ─── Thinking Dots ───
 function ThinkingDots(): React.ReactElement {
   return (
     <div className="flex items-center gap-1.5">
       {[0, 1, 2].map((i: number) => (
-        <div key={i} className="thinking-dot w-1.5 h-1.5 rounded-full bg-blue-400" />
+        <div
+          key={i}
+          className="thinking-dot w-1.5 h-1.5 rounded-full bg-indigo-400"
+          style={{ animationDelay: `${i * 0.15}s` }}
+        />
       ))}
     </div>
   );
 }
 
-// ─── Main InterviewInterface Component ───
+// ─── Main Component ───
 const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
   interviewInfo,
   currentQuestionIndex,
@@ -51,245 +161,307 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
   aiIsSpeaking = false,
   candidateIsThinking = false,
   transcript = "",
+  conversation = "",
   currentQuestionName = "",
   onRepeatQuestion,
+  onNextQuestion,   // ✅ NEW
 }) => {
-  const progress: number = totalQuestions > 0 ? (currentQuestionIndex / totalQuestions) * 100 : 0;
-  const [aiStatus, setAiStatus] = useState<AIStatus>("standby");
-  const [tick, setTick] = useState<number>(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const cameraVideoRef = useRef<HTMLVideoElement>(null);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [aiStatus, setAiStatus] = useState<"standby" | "speaking" | "thinking">("standby");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const lastTranscriptRef = useRef<string>("");
 
-  // ✅ Start camera
+  // ─── Update AI status ───
   useEffect(() => {
-    if (activeUser && !cameraStream) {
-      navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
-      }).then((stream: MediaStream) => {
-        setCameraStream(stream);
-        if (cameraVideoRef.current) {
-          cameraVideoRef.current.srcObject = stream;
-          cameraVideoRef.current.play().catch(() => { });
-        }
-      }).catch(() => { });
+    if (!activeUser) {
+      setAiStatus("standby");
+      return;
     }
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((t: MediaStreamTrack) => t.stop());
-      }
-    };
-  }, [activeUser, cameraStream]);
-
-  // AI status simulation
-  useEffect(() => {
-    if (!activeUser) { setAiStatus("standby"); if (timerRef.current) clearInterval(timerRef.current); return; }
-    setAiStatus("speaking");
-    timerRef.current = setInterval(() => setTick((t: number) => t + 1), 4000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [activeUser]);
-
-  useEffect(() => {
-    if (!activeUser) return;
     if (aiIsSpeaking) setAiStatus("speaking");
     else if (candidateIsThinking) setAiStatus("thinking");
-    else setAiStatus((prev: AIStatus) => (prev === "speaking" ? "thinking" : "speaking"));
-  }, [tick, activeUser, aiIsSpeaking, candidateIsThinking]);
+    else setAiStatus("thinking");
+  }, [activeUser, aiIsSpeaking, candidateIsThinking]);
+
+  // ─── Parse conversation into chat messages ───
+  // ─── Parse conversation into chat messages (with merging) ───
+  useEffect(() => {
+    if (!conversation) return;
+    try {
+      const logs = typeof conversation === "string" ? JSON.parse(conversation) : conversation;
+      if (!Array.isArray(logs)) return;
+
+      // ✅ Merge consecutive same-role messages into single bubbles
+      const merged: ChatMessage[] = [];
+      for (const msg of logs) {
+        const role = msg.role === "user" ? "user" : "ai";
+        const text = (msg.content || msg.message || "").trim();
+        if (!text) continue;
+
+        const last = merged[merged.length - 1];
+        // If the last message has the same role, merge it
+        if (last && last.role === role) {
+          // Only merge if the gap is short (same turn, split by transcriber)
+          last.text = `${last.text} ${text}`;
+        } else {
+          merged.push({
+            role: role as "ai" | "user",
+            text,
+            timestamp: Date.now() + merged.length,
+          });
+        }
+      }
+
+      setMessages(merged);
+    } catch {
+      // ignore
+    }
+  }, [conversation]);
+
+  // ─── Fallback: if no conversation array, use transcript ───
+  useEffect(() => {
+    if (!transcript || transcript === lastTranscriptRef.current) return;
+    if (messages.length > 0) return; // prefer full conversation
+
+    lastTranscriptRef.current = transcript;
+    setMessages((prev) => [
+      ...prev,
+      { role: "ai", text: transcript, timestamp: Date.now() },
+    ]);
+  }, [transcript, messages.length]);
+
+  // ─── Auto-scroll chat ───
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const isSpeaking = aiStatus === "speaking";
   const isThinking = aiStatus === "thinking";
   const isStandby = aiStatus === "standby";
-  const userInitial = interviewInfo?.userName?.[0]?.toUpperCase() || "?";
+
+  const getStatusLabel = (): string => {
+    if (isSpeaking) return "AI Speaking";
+    if (isThinking) return candidateIsThinking ? "Waiting for you..." : "Processing...";
+    if (isStandby) return "Waiting to start...";
+    return "";
+  };
+
+  const getStatusColor = (): string => {
+    if (isSpeaking) return "text-blue-600 bg-blue-50 border-blue-200";
+    if (isThinking) return "text-indigo-600 bg-indigo-50 border-indigo-200";
+    return "text-slate-500 bg-slate-50 border-slate-200";
+  };
 
   return (
-    <>
-      <style>{STYLES}</style>
-      <div className="space-y-4 w-full" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+    <div className="w-full h-full flex gap-4">
 
-        {/* Live Transcript */}
-        {transcript && activeUser && (
-          <div className="w-full px-4 py-3 rounded-2xl flex items-start gap-3"
-            style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(96,165,250,0.2)" }}>
-            <MessageSquare className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-blue-400 uppercase tracking-widest mb-1">AI Says:</p>
-              <p className="text-sm text-slate-300 leading-relaxed line-clamp-2">{transcript}</p>
-            </div>
-          </div>
-        )}
+      {/* ═══════════════════════════════════════════════════════════
+          LEFT SIDE — Animated AI + Status + Controls
+          ═══════════════════════════════════════════════════════════ */}
+      <div className="flex-1 flex flex-col min-w-0">
 
-        {/* Question Name Badge */}
-        {currentQuestionName && activeUser && (
-          <div className="flex items-center justify-center">
-            <span className="text-xs text-slate-400 bg-white/5 px-4 py-1.5 rounded-full border border-white/10">
-              📋 <span className="font-bold text-white">{currentQuestionName}</span>
-              <span className="text-slate-500 ml-2">({currentQuestionIndex}/{totalQuestions})</span>
+        {/* Top: Current Question Info */}
+        <div className="shrink-0 mb-3">
+          <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">
+            <span>Current Question</span>
+            <span className="text-blue-600">
+              {currentQuestionIndex} / {totalQuestions}
             </span>
           </div>
-        )}
+          <p className="text-sm font-bold text-slate-700 line-clamp-2">
+            {currentQuestionName || "Getting ready..."}
+          </p>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full">
+        {/* Center: Radial Animation */}
+        <div className="flex-1 flex items-center justify-center min-h-0 relative">
+          <RadialBars
+            isSpeaking={isSpeaking}
+            isThinking={isThinking}
+            volume={0}
+          />
+        </div>
 
-          {/* ══════════════ AI CARD ══════════════ */}
-          <div className="card-left relative rounded-[2.5rem] overflow-hidden flex flex-col items-center justify-center py-10 px-6 min-h-80"
-            style={{
-              background: "linear-gradient(145deg, rgba(15,23,42,.95) 0%, rgba(17,24,39,.9) 100%)",
-              border: isSpeaking ? "1px solid rgba(96,165,250,.45)" : "1px solid rgba(255,255,255,.07)",
-              boxShadow: isSpeaking ? "0 0 60px rgba(37,99,235,.2), inset 0 1px 0 rgba(255,255,255,.05)" : "inset 0 1px 0 rgba(255,255,255,.04)",
-              transition: "border-color .5s, box-shadow .5s",
-            }}>
-            {isSpeaking && <div className="scan-h" />}
-            <div className="absolute top-5 left-0 right-0 flex justify-center z-10">
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full"
-                style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                <Brain className="w-3 h-3 text-blue-400" />
-                <span className="text-[9px] font-bold text-white uppercase tracking-[.2em]">AI Interviewer</span>
+        {/* Bottom: Status + Repeat Button (LEFT aligned) */}
+        <div className="shrink-0 flex items-center gap-3 mt-3">
+
+          {/* Status badge */}
+          <div
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${getStatusColor()}`}
+          >
+            {isSpeaking && (
+              <div className="flex items-end gap-[2px] h-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="w-[2px] rounded-full bg-blue-500"
+                    style={{
+                      height: "100%",
+                      animation: `waveform 0.8s ease-in-out ${i * 0.1}s infinite`,
+                    }}
+                  />
+                ))}
               </div>
-            </div>
-
-            <div className="relative flex items-center justify-center mb-5 float-anim">
-              {isSpeaking && (
-                <>
-                  <div className="ring-1-anim absolute w-44 h-44 rounded-full" style={{ border: "1px solid rgba(96,165,250,.3)" }} />
-                  <div className="ring-2-anim absolute w-52 h-52 rounded-full" style={{ border: "1px solid rgba(96,165,250,.15)" }} />
-                </>
-              )}
-              <div className={`relative w-32 h-32 rounded-full overflow-hidden ${isSpeaking ? "ai-glow" : ""}`}
-                style={{ border: "2px solid rgba(96,165,250,.25)", transition: "all .5s" }}>
-                <Image src="/ai-model.jpg" fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover" alt="AI" />
-                {isThinking && (
-                  <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,8,23,.55)" }}>
-                    <ThinkingDots />
-                  </div>
-                )}
-              </div>
-              <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 flex items-center justify-center"
-                style={{ background: isSpeaking ? "#22c55e" : isThinking ? "#f59e0b" : "#475569", borderColor: "#020817" }}>
-                <Zap className="w-2.5 h-2.5 text-white" style={{ width: 10, height: 10 }} />
-              </div>
-            </div>
-
-            <h2 className="text-white font-bold text-lg mb-1" style={{ fontFamily: "'Syne',sans-serif", letterSpacing: ".02em" }}>AI Recruiter</h2>
-
-            <div className="status-badge flex items-center gap-2 mt-1" key={aiStatus}>
-              {isSpeaking && <><WaveBars /><span className="text-[10px] text-blue-400 font-medium">Speaking…</span></>}
-              {isThinking && <><ThinkingDots /><span className="text-[10px] text-amber-400 font-medium ml-1">{candidateIsThinking ? "You're thinking..." : "Processing…"}</span></>}
-              {isStandby && <><div className="w-1.5 h-1.5 rounded-full bg-slate-600" /><span className="text-[10px] text-slate-500 font-medium">Waiting...</span></>}
-            </div>
-
-            {activeUser && onRepeatQuestion && (
-              <button onClick={onRepeatQuestion}
-                className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all active:scale-95 hover:bg-white/10"
-                style={{ color: "#94a3b8", border: "1px solid rgba(255,255,255,0.1)" }}>
-                <RefreshCw className="w-3.5 h-3.5" /> Repeat Question
-              </button>
             )}
-
-            <div className="absolute bottom-6 w-36 space-y-1">
-              <div className="flex justify-between text-[9px] text-slate-600"><span>Progress</span><span className="text-blue-500 font-bold">{Math.round(progress)}%</span></div>
-              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.06)" }}>
-                <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${progress}%`, background: "linear-gradient(90deg,#1d4ed8,#60a5fa)", boxShadow: "0 0 8px rgba(96,165,250,.6)" }} />
-              </div>
-            </div>
+            {isThinking && <ThinkingDots />}
+            {isStandby && <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />}
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              {getStatusLabel()}
+            </span>
           </div>
 
-          {/* ══════════════ USER CARD - FULL CAMERA VIEW ══════════════ */}
-          <div className="card-right relative rounded-[2.5rem] overflow-hidden flex flex-col min-h-80"
-            style={{
-              background: !cameraStream ? "linear-gradient(145deg, rgba(15,23,42,.95) 0%, rgba(17,24,39,.9) 100%)" : "#000",
-              border: activeUser && cameraStream ? "2px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,.07)",
-              boxShadow: activeUser && cameraStream ? "0 0 40px rgba(99,102,241,0.3)" : "inset 0 1px 0 rgba(255,255,255,.04)",
-              transition: "all 0.5s",
-            }}>
+          {/* Repeat button */}
+          {/* Repeat + Next buttons */}
+          {activeUser && (
+            <div className="flex items-center gap-2">
+              {onRepeatQuestion && (
+                <button
+                  onClick={onRepeatQuestion}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-95 bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300 shadow-sm"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Repeat
+                </button>
+              )}
 
-            {/* ✅ FULL CAMERA - Simplified & Guaranteed to show */}
-            {activeUser && cameraStream ? (
-              <>
-                {/* Video element - NO overlay blocking it initially */}
-                <video
-                  ref={cameraVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className="absolute inset-0 w-full h-full"
-                  style={{
-                    objectFit: "cover",
-                    transform: "scaleX(-1)",
-                    zIndex: 1,
-                  }}
-                />
+              {/* ✅ NEW: Next Question button */}
+              {onNextQuestion && (
+                <button
+                  onClick={onNextQuestion}
+                  disabled={currentQuestionIndex >= totalQuestions - 1}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-95 bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow-md shadow-blue-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next Question
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
 
-                {/* Gradient overlay - only at bottom for text */}
-                <div className="absolute inset-0 z-10 pointer-events-none"
-                  style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.1) 40%, rgba(0,0,0,0.2) 100%)" }} />
-
-                {/* Live indicator - top right */}
-                <div className="absolute top-4 right-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/20">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-[10px] font-bold text-white uppercase tracking-widest">Live</span>
-                </div>
-
-                {/* Top label */}
-                <div className="absolute top-4 left-0 right-0 flex justify-center z-30">
-                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
-                    <Camera className="w-3 h-3 text-green-400" />
-                    <span className="text-[9px] font-bold text-white uppercase tracking-[.2em]">Live Camera</span>
-                  </div>
-                </div>
-
-                {/* User info at bottom */}
-                <div className="absolute bottom-6 left-0 right-0 z-30 flex flex-col items-center gap-2">
-                  <h2 className="text-white font-bold text-xl"
-                    style={{ fontFamily: "'Syne',sans-serif", letterSpacing: ".02em", textShadow: "0 2px 10px rgba(0,0,0,0.8)" }}>
-                    {interviewInfo?.userName || "Candidate"}
-                  </h2>
-
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
-                    <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <Mic className="w-3 h-3 text-green-400" />
-                    <span className="text-[10px] text-green-400 font-medium">Live</span>
-                  </div>
-
-                  {candidateIsThinking && (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full animate-pulse bg-amber-500/30 border border-amber-500/40 backdrop-blur-md">
-                      <ThinkingDots />
-                      <span className="text-[10px] text-amber-300 font-medium">Thinking...</span>
-                    </div>
-                  )}
-                </div>
-              </>
+          {/* Mic indicator */}
+          <div className="ml-auto flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
+            {activeUser ? (
+              <Mic className="w-3 h-3 text-green-500" />
             ) : (
-              /* ═══ NO CAMERA - Static Avatar ═══ */
-              <div className="flex-1 flex flex-col items-center justify-center py-10 px-6 relative">
-                <div className="absolute top-5 left-0 right-0 flex justify-center">
-                  <div className="flex items-center gap-2 px-3 py-1 rounded-full"
-                    style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.07)" }}>
-                    <CameraOff className="w-3 h-3 text-slate-500" />
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[.2em]">Camera Off</span>
-                  </div>
-                </div>
-
-                <div className="relative mb-5">
-                  <div className="w-32 h-32 rounded-full flex items-center justify-center text-5xl font-black text-white"
-                    style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#4338ca 50%,#312e81 100%)", border: "2px solid rgba(99,102,241,.3)", fontFamily: "'Syne',sans-serif" }}>
-                    {userInitial}
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 flex items-center justify-center"
-                    style={{ background: activeUser ? "#22c55e" : "#6366f1", borderColor: "#020817" }}>
-                    {activeUser ? <Mic className="text-white" style={{ width: 10, height: 10 }} /> : <MicOff className="text-white" style={{ width: 10, height: 10 }} />}
-                  </div>
-                </div>
-
-                <h2 className="text-white font-bold text-lg mb-1" style={{ fontFamily: "'Syne',sans-serif", letterSpacing: ".02em" }}>
-                  {interviewInfo?.userName || "Candidate"}
-                </h2>
-              </div>
+              <MicOff className="w-3 h-3 text-slate-400" />
             )}
+            <span className="text-[10px] text-slate-500 font-medium">
+              {interviewInfo?.userName || "Candidate"}
+            </span>
           </div>
         </div>
       </div>
-    </>
+
+      {/* ═══════════════════════════════════════════════════════════
+          RIGHT SIDE — Chat-Style Transcript
+          ═══════════════════════════════════════════════════════════ */}
+      <div
+        className="w-[340px] lg:w-[380px] shrink-0 flex flex-col rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden"
+        style={{ maxHeight: "100%" }}
+      >
+        {/* Chat header */}
+        <div className="shrink-0 px-4 py-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
+          <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
+            <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-slate-800">Live Transcript</p>
+            <p className="text-[9px] text-slate-400 uppercase tracking-widest">
+              {messages.length} message{messages.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+          {isSpeaking && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 border border-blue-100">
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-[9px] font-bold text-blue-600 uppercase">Live</span>
+            </div>
+          )}
+        </div>
+
+        {/* Chat messages — scrollable */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
+              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center">
+                <MessageSquare className="w-5 h-5 text-slate-400" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-500">No messages yet</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Conversation will appear here
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`flex gap-2 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+                >
+                  {/* Avatar */}
+                  <div
+                    className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${msg.role === "ai"
+                      ? "bg-gradient-to-br from-blue-500 to-blue-700"
+                      : "bg-gradient-to-br from-slate-500 to-slate-700"
+                      }`}
+                  >
+                    {msg.role === "ai" ? (
+                      <Bot className="w-3 h-3 text-white" />
+                    ) : (
+                      <User className="w-3 h-3 text-white" />
+                    )}
+                  </div>
+
+                  {/* Bubble */}
+                  <div
+                    className={`max-w-[85%] px-3 py-2 rounded-2xl text-[12px] leading-relaxed ${msg.role === "ai"
+                      ? "bg-blue-50 text-slate-700 border border-blue-100 rounded-tl-sm"
+                      : "bg-slate-100 text-slate-700 border border-slate-200 rounded-tr-sm"
+                      }`}
+                  >
+                    <p className="font-bold text-[9px] uppercase tracking-wider mb-1 opacity-60">
+                      {msg.role === "ai" ? "AI Recruiter" : interviewInfo?.userName || "You"}
+                    </p>
+                    <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </>
+          )}
+        </div>
+
+        {/* Chat footer — typing indicator */}
+        {isSpeaking && activeUser && (
+          <div className="shrink-0 px-4 py-2 border-t border-slate-100 flex items-center gap-2 bg-blue-50/30">
+            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+              <Bot className="w-2.5 h-2.5 text-white" />
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0s" }} />
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0.15s" }} />
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0.3s" }} />
+            </div>
+            <span className="text-[10px] text-blue-500 font-medium">AI is speaking...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Global keyframes */}
+      <style>{`
+        @keyframes waveform {
+          0%, 100% { transform: scaleY(0.4); }
+          50% { transform: scaleY(1); }
+        }
+        @keyframes thinking-bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.5; }
+          50% { transform: translateY(-3px); opacity: 1; }
+        }
+        .thinking-dot {
+          animation: thinking-bounce 0.8s ease-in-out infinite;
+        }
+      `}</style>
+    </div>
   );
 };
 

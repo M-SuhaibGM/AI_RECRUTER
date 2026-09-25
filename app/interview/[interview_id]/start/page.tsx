@@ -41,12 +41,14 @@ function StartInterview(): React.ReactElement {
     aiIsSpeaking,
     candidateIsThinking,
     transcript,
+    conversation,      // ✅ ADDED — was missing
     currentQuestionIndex,
     progressPercentage,
     totalQuestions,
     handleRepeatQuestion,
     handleStop,
     syncAntiCheatRefs,
+    handleNextQuestion,   // ✅ NEW
   } = useInterviewVapi({
     interviewInfo,
     interviewId: interview_id,
@@ -107,6 +109,37 @@ function StartInterview(): React.ReactElement {
     }
   }, [elapsedSecs, activeUser, totalDuration, showTimeWarning]);
 
+  /* ─── Mouse-out warning ─── */
+  useEffect(() => {
+    if (!activeUser) return;
+
+    let lastWarnedAt = 0;
+    const WARN_COOLDOWN = 10000;
+
+    const handleMouseOut = (e: MouseEvent): void => {
+      if (e.relatedTarget) return;
+      if (document.hidden) return;
+
+      const now = Date.now();
+      if (now - lastWarnedAt < WARN_COOLDOWN) return;
+      lastWarnedAt = now;
+
+      toast.warning("⚠️ Please stay in the interview window", {
+        description:
+          "You moved your cursor outside the interview window. Please keep your mouse within the browser during the session.",
+        duration: 5000,
+        style: {
+          background: "#fef3c7",
+          color: "#92400e",
+          border: "1px solid #fcd34d",
+        },
+      });
+    };
+
+    document.addEventListener("mouseout", handleMouseOut);
+    return () => document.removeEventListener("mouseout", handleMouseOut);
+  }, [activeUser]);
+
   /* ─── RENDER ─── */
   return (
     <>
@@ -136,9 +169,9 @@ function StartInterview(): React.ReactElement {
               onAllReady={() => setIsPreCheckComplete(true)}
             />
           ) : (
-            <div className="w-full max-w-5xl h-full flex flex-col justify-center py-6">
+            <div className="w-full max-w-6xl h-full flex flex-col py-4">
               {/* Progress Bar */}
-              <div className="mb-6 space-y-2">
+              <div className="mb-4 space-y-2 shrink-0">
                 <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase tracking-widest">
                   <span>Session Progress</span>
                   <span className="text-blue-400 font-bold">{progressPercentage}%</span>
@@ -155,21 +188,27 @@ function StartInterview(): React.ReactElement {
                 </div>
               </div>
 
-              <InterviewInterface
-                interviewInfo={interviewInfo}
-                currentQuestionIndex={currentQuestionIndex}
-                totalQuestions={totalQuestions}
-                activeUser={activeUser}
-                aiIsSpeaking={aiIsSpeaking}
-                candidateIsThinking={candidateIsThinking}
-                transcript={transcript}
-                currentQuestionName={currentQuestionName}
-                onRepeatQuestion={handleRepeatQuestion}
-              />
+              {/* ✅ Interview Interface — ONE instance, fills remaining height */}
+              <div className="flex-1 min-h-0">
+                <InterviewInterface
+                  interviewInfo={interviewInfo}
+                  currentQuestionIndex={currentQuestionIndex}
+                  totalQuestions={totalQuestions}
+                  activeUser={activeUser}
+                  aiIsSpeaking={aiIsSpeaking}
+                  candidateIsThinking={candidateIsThinking}
+                  transcript={transcript}
+                  conversation={conversation}
+                  currentQuestionName={currentQuestionName}
+                  onRepeatQuestion={handleRepeatQuestion}
+                  onNextQuestion={handleNextQuestion}   // ✅ NEW
+                />
+              </div>
             </div>
           )}
         </main>
 
+        {/* ═══ FOOTER — Only InterviewControls ═══ */}
         {isPreCheckComplete && (
           <footer
             className="footer-anim relative z-20 shrink-0 px-6 md:px-16 py-4"
@@ -191,6 +230,8 @@ function StartInterview(): React.ReactElement {
                 />
               </div>
             )}
+
+            {/* ✅ ONLY InterviewControls — no duplicate InterviewInterface */}
             <InterviewControls
               loading={loading}
               activeUser={activeUser}
