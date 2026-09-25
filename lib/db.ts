@@ -1,4 +1,4 @@
-// // lib/prisma.ts (or wherever you initialize your db client)
+// lib/prisma.ts (or wherever you initialize your db client localy)
 // import "dotenv/config";
 // import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 // import { PrismaClient } from "@prisma/client";

@@ -22,9 +22,9 @@ type AIStatus = "standby" | "speaking" | "thinking";
 // ─── Wave Bars Component ───
 function WaveBars({ color = "#60a5fa" }: WaveBarsProps): React.ReactElement {
   return (
-    <div className="flex items-end gap-[3px] h-5">
+    <div className="flex items-end gap-0.75 h-5">
       {[...Array(5)].map((_: unknown, i: number) => (
-        <div key={i} className="wave-bar w-[3px] rounded-full"
+        <div key={i} className="wave-bar w-0.75 rounded-full"
           style={{ height: "100%", background: color, animationDelay: `${i * 0.1}s` }} />
       ))}
     </div>
@@ -79,7 +79,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
         cameraStream.getTracks().forEach((t: MediaStreamTrack) => t.stop());
       }
     };
-  }, [activeUser,cameraStream]);
+  }, [activeUser, cameraStream]);
 
   // AI status simulation
   useEffect(() => {
@@ -131,7 +131,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full">
 
           {/* ══════════════ AI CARD ══════════════ */}
-          <div className="card-left relative rounded-[2.5rem] overflow-hidden flex flex-col items-center justify-center py-10 px-6 min-h-[320px]"
+          <div className="card-left relative rounded-[2.5rem] overflow-hidden flex flex-col items-center justify-center py-10 px-6 min-h-80"
             style={{
               background: "linear-gradient(145deg, rgba(15,23,42,.95) 0%, rgba(17,24,39,.9) 100%)",
               border: isSpeaking ? "1px solid rgba(96,165,250,.45)" : "1px solid rgba(255,255,255,.07)",
@@ -156,7 +156,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
               )}
               <div className={`relative w-32 h-32 rounded-full overflow-hidden ${isSpeaking ? "ai-glow" : ""}`}
                 style={{ border: "2px solid rgba(96,165,250,.25)", transition: "all .5s" }}>
-                <Image src="/ai-model.jpg" fill className="object-cover" alt="AI" />
+                <Image src="/ai-model.jpg" fill sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" className="object-cover" alt="AI" />
                 {isThinking && (
                   <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,8,23,.55)" }}>
                     <ThinkingDots />
@@ -195,7 +195,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
           </div>
 
           {/* ══════════════ USER CARD - FULL CAMERA VIEW ══════════════ */}
-          <div className="card-right relative rounded-[2.5rem] overflow-hidden flex flex-col min-h-[320px]"
+          <div className="card-right relative rounded-[2.5rem] overflow-hidden flex flex-col min-h-80"
             style={{
               background: !cameraStream ? "linear-gradient(145deg, rgba(15,23,42,.95) 0%, rgba(17,24,39,.9) 100%)" : "#000",
               border: activeUser && cameraStream ? "2px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,.07)",

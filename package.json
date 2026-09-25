@@ -1,7 +1,12 @@
 {
-  "name": "car_connect",
+  "name": "ai-recruiter",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "@vapi-ai/web": {
+      "@daily-co/daily-js": "0.92.2"
+    }
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",

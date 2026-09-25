@@ -9,7 +9,7 @@ function InterviewHeader() {
         alt="logo"
         width={100}
         height={80}
-        className="w-[50px] ml-4"
+        className="w-12.5 ml-4"
       />
     </div>
   );
