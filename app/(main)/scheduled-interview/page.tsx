@@ -24,8 +24,11 @@ export default function ScheduledInterviewPage() {
 
 async function ReportsData() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/auth/login");
+  if (!session?.user?.email) {
+    redirect("/auth/login?callbackUrl=/scheduled-interview");
+  }
 
+  // ✅ Direct DB call via server action
   const reports = await getCandidateReports(session.user.email);
 
   return <ScheduledInterviewClient initialReports={reports} />;
