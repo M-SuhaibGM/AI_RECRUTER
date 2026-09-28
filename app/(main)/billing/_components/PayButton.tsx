@@ -1,55 +1,75 @@
 "use client";
-import React, { useState } from "react";
+
+import React, { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useSession } from "next-auth/react";
-import axios from "axios";
 
 interface PayButtonProps {
   amount: number;
   credits: number;
+  onSuccess?: (creditsAdded: number) => void;
   className?: string;
 }
 
-const PayButton: React.FC<PayButtonProps> = ({ amount, credits, className }) => {
+const PayButton: React.FC<PayButtonProps> = ({
+  amount,
+  credits,
+  onSuccess,
+  className,
+}) => {
   const { data: session } = useSession();
   const user = session?.user;
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
+  // ✅ Prevent double-clicks even if React hasn't re-rendered yet
+  const inFlightRef = useRef(false);
 
-  // ─── Handle Checkout ───
-  const handleCheckout = async (): Promise<void> => {
+  const handleCheckout = useCallback(async (): Promise<void> => {
+    if (inFlightRef.current) return;
     if (!user?.email) {
       toast.error("Please sign in to continue.");
       return;
     }
 
+    inFlightRef.current = true;
     setLoading(true);
+
     try {
-      const response = await axios.post("/api/checkout", {
-        amount,
-        credits,
-        email: user.email,
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount, credits, email: user.email }),
       });
 
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Payment initiation failed.");
       }
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || "Payment initiation failed.");
-    } finally {
+
+      if (data.url) {
+        // ✅ Redirect to Stripe
+        window.location.href = data.url;
+      } else {
+        throw new Error("No checkout URL returned");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Payment failed";
+      toast.error(message);
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, [amount, credits, user?.email]);
 
   return (
     <Button
       onClick={handleCheckout}
-      disabled={loading}
+      disabled={loading || !user?.email}
       className={`w-full bg-blue-600 cursor-pointer text-white rounded-md font-medium 
         hover:bg-blue-700 shadow-lg shadow-blue-100 
         disabled:opacity-50 disabled:cursor-not-allowed
-        transition-all duration-300 active:scale-95
+        transition-colors duration-300 active:scale-95
         ${className ?? ""}`}
     >
       {loading ? (

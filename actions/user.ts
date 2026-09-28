@@ -15,6 +15,12 @@ interface DeleteResult {
   message: string;
 }
 
+export interface UserConfigData {
+  language: string;
+  voiceId: string;
+  voiceProvider: string;
+}
+
 // ─── Get User Credits ───
 export async function getUserCredits(): Promise<number> {
   try {
@@ -99,3 +105,19 @@ export async function deleteInterview(interviewId: string): Promise<DeleteResult
   }
 }
 
+export async function getUserConfig(email: string): Promise<UserConfigData> {
+  if (!email) {
+    return { language: "en-US", voiceId: "jennifer", voiceProvider: "vapi" };
+  }
+
+  const config = await prisma.userConfig.findUnique({
+    where: { userEmail: email },
+  });
+
+  // ✅ Defaults must match your schema defaults
+  return {
+    language: config?.language ?? "en-US",
+    voiceId: config?.voiceId ?? "jennifer",
+    voiceProvider: "vapi", // not stored in DB — hardcoded default
+  };
+}

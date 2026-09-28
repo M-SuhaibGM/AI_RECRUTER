@@ -1,81 +1,76 @@
-import React, { useState, ChangeEvent } from "react";
+"use client";
+
+import React, { useState, useCallback, useMemo } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, Send, Mail, Building2, FileText, User, Award } from "lucide-react";
+import { Loader2, Send, Mail, Building2, FileText, Award } from "lucide-react";
 
-// ─── Type Definitions ───
+// ─── Types ───
 interface FeedbackRating {
-  technicalSkills: number;
-  communication: number;
-  problemSolving: number;
-  experience: number;
+  technicalSkills?: number;
+  communication?: number;
+  problemSolving?: number;
+  experience?: number;
 }
 
-interface Feedback {
+interface FeedbackShape {
+  feedback?: {
+    rating?: FeedbackRating;
+    summary?: string;
+  };
   rating?: FeedbackRating;
-  summary?: string;
-  recommendation?: string;
-  recommendationMsg?: string;
 }
 
 interface Candidate {
   id?: string;
   userName?: string;
   userEmail?: string;
-  feedback?: Feedback | any;
-  score?: number;
+  feedback?: FeedbackShape | null;
 }
 
-interface SelectionLetterDialogProps {
+interface Props {
   candidate: Candidate;
   recommendation?: string;
 }
 
-interface EmailPayload {
-  email: string | undefined;
-  subject: string;
-  message: string;
-  company: string;
+// ─── Score extraction ───
+function getScore(feedback: FeedbackShape | null | undefined): number {
+  if (!feedback) return 0;
+  const rating = feedback.feedback?.rating ?? feedback.rating;
+  if (!rating) return 0;
+  const sum =
+    (rating.technicalSkills ?? 0) +
+    (rating.communication ?? 0) +
+    (rating.problemSolving ?? 0) +
+    (rating.experience ?? 0);
+  return sum / 4;
 }
 
-// ─── Main Component ───
-function SelectionLetterDialog({ 
-  candidate, 
-  recommendation 
-}: SelectionLetterDialogProps): React.ReactElement {
-  const [companyName, setCompanyName] = useState<string>("Our Company");
-  const [loading, setLoading] = useState<boolean>(false);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
+// ─── Main ───
+export default function SelectionLetterDialog({ candidate, recommendation }: Props) {
+  const [companyName, setCompanyName] = useState("Our Company");
+  const [loading, setLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
-  // Calculate average score safely
-  const feedback: Feedback | null = candidate?.feedback?.feedback || candidate?.feedback || null;
-  const ratings = feedback?.rating;
-  const avgScore: number = ratings
-    ? (ratings.technicalSkills || 0) + 
-      (ratings.communication || 0) + 
-      (ratings.problemSolving || 0) + 
-      (ratings.experience || 0)
-    : 0;
-  const avgScoreDisplay: string = ratings 
-    ? (avgScore / 4).toFixed(1) 
-    : "0.0";
+  // ✅ Memoize derived values
+  const avgScoreDisplay = useMemo(
+    () => getScore(candidate?.feedback).toFixed(1),
+    [candidate?.feedback]
+  );
 
-  // Determine letter type based on recommendation
-  const isRejected: boolean = recommendation === "No" || recommendation === "Reject";
-  const isSelected: boolean = !isRejected && recommendation !== undefined;
+  const isRejected = recommendation === "No" || recommendation === "Reject";
 
-  // Generate letter template
-  const generateLetterTemplate = (): string => {
+  // ✅ Memoize letter template — only regenerates when inputs change
+  const letterTemplate = useMemo(() => {
+    const name = candidate?.userName || "Candidate";
+    const summary = candidate?.feedback?.feedback?.summary;
+
     if (isRejected) {
-      return `Dear ${candidate?.userName || "Candidate"},
+      return `Dear ${name},
 
 Thank you for taking the time to complete our AI-powered interview assessment for the position at ${companyName}.
 
@@ -87,29 +82,26 @@ Best regards,
 The Recruitment Team at ${companyName}`;
     }
 
-    return `Dear ${candidate?.userName || "Candidate"},
+    return `Dear ${name},
 
 We are pleased to inform you that after reviewing your assessment, where you scored ${avgScoreDisplay}/10, we would like to move forward with your application at ${companyName}.
 
-We were particularly impressed with your performance${
-      feedback?.summary ? `:\n\n"${feedback.summary}"` : "."
-    }
+We were particularly impressed with your performance${summary ? `:\n\n"${summary}"` : "."}
 
 Next steps will be communicated to you shortly. Congratulations on your achievement!
 
 Best regards,
 The Recruitment Team at ${companyName}`;
-  };
+  }, [candidate, companyName, avgScoreDisplay, isRejected]);
 
-  const letterTemplate: string = generateLetterTemplate();
+  const handleCompanyNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setCompanyName(e.target.value);
+    },
+    []
+  );
 
-  // Handle company name change
-  const handleCompanyNameChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setCompanyName(e.target.value);
-  };
-
-  // Send email
-  const sendEmail = async (): Promise<void> => {
+  const sendEmail = useCallback(async () => {
     if (!candidate?.userEmail) {
       toast.error("Candidate email not found");
       return;
@@ -117,69 +109,58 @@ The Recruitment Team at ${companyName}`;
 
     setLoading(true);
     try {
-      const emailPayload: EmailPayload = {
-        email: candidate.userEmail,
-        subject: `${isRejected ? "Application Update" : "Congratulations!"} - ${companyName}`,
-        message: letterTemplate,
-        company: companyName,
-      };
-
-      const response: Response = await fetch("/api/send_email", {
+      const res = await fetch("/api/send_email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(emailPayload),
+        body: JSON.stringify({
+          email: candidate.userEmail,
+          subject: `${isRejected ? "Application Update" : "Congratulations!"} - ${companyName}`,
+          message: letterTemplate,
+          company: companyName,
+        }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.message || "Failed to send email");
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to send email");
       }
 
       toast.success(
-        isRejected 
-          ? "Rejection letter sent successfully!" 
-          : "Selection letter sent successfully!",
-        {
-          description: `Email sent to ${candidate.userEmail}`,
-        }
+        isRejected ? "Rejection letter sent!" : "Selection letter sent!",
+        { description: `Email sent to ${candidate.userEmail}` }
       );
-      
       setIsOpen(false);
-    } catch (error: unknown) {
-      const err = error as Error;
-      console.error("Nodemailer Error:", err.message);
-      toast.error("Failed to send email", {
-        description: "Please check your server configuration.",
-      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send email";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [candidate, companyName, letterTemplate, isRejected]);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button
-          className={`gap-2 px-4 py-2 rounded-xl text-white font-medium transition-all active:scale-95 ${
-            isRejected 
-              ? "bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200" 
-              : isSelected
-                ? "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200"
-                : "bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200"
+          className={`gap-2 px-4 py-2 rounded-xl text-white font-medium active:scale-95 transition-transform ${
+            isRejected
+              ? "bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200"
+              : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200"
           }`}
         >
           <Send className="h-4 w-4" />
           {isRejected ? "Send Rejection" : "Send Offer"}
         </Button>
       </DialogTrigger>
-      
+
       <DialogContent className="max-w-4xl rounded-3xl p-0 overflow-hidden border-none max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <DialogHeader className={`p-6 text-white shrink-0 ${
-          isRejected 
-            ? "bg-gradient-to-r from-red-600 to-rose-600" 
-            : "bg-gradient-to-r from-emerald-600 to-teal-600"
-        }`}>
+        <DialogHeader
+          className={`p-6 text-white shrink-0 ${
+            isRejected
+              ? "bg-linear-to-r from-red-600 to-rose-600"
+              : "bg-linear-to-r from-emerald-600 to-teal-600"
+          }`}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-white/20 rounded-xl">
               <Mail className="h-5 w-5" />
@@ -189,21 +170,19 @@ The Recruitment Team at ${companyName}`;
                 {isRejected ? "Draft Rejection Letter" : "Draft Selection Letter"}
               </DialogTitle>
               <p className="text-sm opacity-80 mt-1">
-                {isRejected 
+                {isRejected
                   ? "Notify the candidate about the decision."
-                  : "Customize and send the offer letter."
-                }
+                  : "Customize and send the offer letter."}
               </p>
             </div>
           </div>
         </DialogHeader>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
-          {/* Candidate Info Card */}
+          {/* Candidate Info */}
           <div className="flex items-center gap-3 mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="h-12 w-12 bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center rounded-xl text-white font-bold shadow-md">
-              {candidate?.userName?.charAt(0)?.toUpperCase() || "U"}
+            <div className="h-12 w-12 bg-linear-to-br from-blue-600 to-blue-700 flex items-center justify-center rounded-xl text-white font-bold shadow-md">
+              {candidate?.userName?.charAt(0).toUpperCase() || "U"}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-slate-800 truncate">
@@ -212,11 +191,11 @@ The Recruitment Team at ${companyName}`;
               <p className="text-xs text-slate-500 truncate">{candidate?.userEmail}</p>
             </div>
             <div className="shrink-0">
-              <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full ${
-                isRejected 
-                  ? "bg-red-100 text-red-600" 
-                  : "bg-emerald-100 text-emerald-600"
-              }`}>
+              <span
+                className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full ${
+                  isRejected ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-600"
+                }`}
+              >
                 <Award className="h-3.5 w-3.5" />
                 {avgScoreDisplay}/10
               </span>
@@ -224,7 +203,7 @@ The Recruitment Team at ${companyName}`;
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Letter Preview - Takes 3 columns */}
+            {/* Letter Preview */}
             <div className="lg:col-span-3 flex flex-col min-h-0">
               <div className="flex items-center gap-2 mb-3">
                 <FileText className="h-4 w-4 text-slate-400" />
@@ -233,26 +212,23 @@ The Recruitment Team at ${companyName}`;
                 </span>
               </div>
               <div className="flex-1 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                {/* Email Header Bar */}
-                <div className="bg-slate-100 px-5 py-2.5 border-b border-slate-200 flex items-center gap-2">
+                <div className="bg-slate-100 px-5 py-2.5 border-b border-slate-200">
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     <span className="font-medium">To:</span>
                     <span>{candidate?.userEmail || "candidate@email.com"}</span>
                   </div>
                 </div>
-                {/* Letter Content */}
                 <div className="p-6 text-sm leading-relaxed text-slate-700 whitespace-pre-line overflow-y-auto max-h-[400px] font-sans">
                   {letterTemplate}
                 </div>
               </div>
             </div>
 
-            {/* Controls - Takes 2 columns */}
+            {/* Controls */}
             <div className="lg:col-span-2 flex flex-col gap-4">
-              {/* Company Name Input */}
               <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
-                <label 
-                  htmlFor="company" 
+                <label
+                  htmlFor="company"
                   className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-3"
                 >
                   <Building2 className="h-3.5 w-3.5" />
@@ -263,13 +239,13 @@ The Recruitment Team at ${companyName}`;
                   value={companyName}
                   onChange={handleCompanyNameChange}
                   placeholder="Enter company name"
-                  className="rounded-xl bg-white" type={undefined}                />
+                  className="rounded-xl bg-white"
+                />
                 <p className="text-[10px] text-slate-400 mt-2">
                   This will appear in the letter header and signature.
                 </p>
               </div>
 
-              {/* Letter Info */}
               <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Letter Type</span>
@@ -289,14 +265,13 @@ The Recruitment Team at ${companyName}`;
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex flex-col gap-2 mt-auto">
-                <Button 
-                  onClick={sendEmail} 
+                <Button
+                  onClick={sendEmail}
                   disabled={loading}
                   className={`w-full gap-2 rounded-xl h-12 text-sm font-bold ${
-                    isRejected 
-                      ? "bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200" 
+                    isRejected
+                      ? "bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200"
                       : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200"
                   }`}
                 >
@@ -328,5 +303,3 @@ The Recruitment Team at ${companyName}`;
     </Dialog>
   );
 }
-
-export default SelectionLetterDialog;

@@ -7,9 +7,14 @@ function CreateOptions() {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
       {/* Option 1: Video Interview (Active) */}
       <Link href={"/dashboard/create-interview"}>
-        <div className="group relative bg-white border border-slate-200 rounded-2xl p-8 cursor-pointer transition-all duration-300 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 hover:-translate-y-1">
+        <div className="group relative bg-white border border-slate-200 rounded-2xl p-8 cursor-pointer 
+          transition-[border-color,box-shadow,transform] duration-300 
+          hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 
+          md:hover:-translate-y-1">
+          
           <div className="flex items-start justify-between mb-6">
-            <div className="p-4 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 group-hover:scale-110 transition-transform duration-300">
+            <div className="p-4 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 
+              md:group-hover:scale-110 transition-transform duration-300">
               <Video className="text-white h-7 w-7" />
             </div>
             <div className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
@@ -35,7 +40,7 @@ function CreateOptions() {
         </div>
 
         <div className="flex items-start mb-6">
-          <div className="p-4 bg-slate-200 rounded-2xl transition-transform duration-300">
+          <div className="p-4 bg-slate-200 rounded-2xl">
             <Phone className="text-slate-500 h-7 w-7" />
           </div>
         </div>

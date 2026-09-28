@@ -19,7 +19,7 @@ function CandidateReviewSkeleton() {
         </div>
 
         {/* Right Side Skeleton (Button) */}
-        <div className="w-full md:w-[200px]">
+        <div className="w-full md:w-50">
           <div className="h-12 w-full bg-slate-200 rounded-lg"></div>
         </div>
         

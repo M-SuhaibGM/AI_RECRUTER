@@ -165,3 +165,16 @@ video {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Background pattern */
+.communication-bg {
+  background-color: #F6F7F9;
+  background-image: radial-gradient(#DEE2E9 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Focus states — no JS required */
+.communication-input:focus {
+  border-color: #3652FF !important;
+  background-color: #FFFFFF;
+}

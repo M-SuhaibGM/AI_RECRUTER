@@ -1,77 +1,66 @@
 import Stripe from "stripe";
-import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-// ─── Type Definitions ───
-interface CheckoutRequest {
-  amount: number;
-  credits: number;
-  email?: string;
-  planName?: string;
-}
-
-interface CheckoutSuccessResponse {
-  url: string;
-  sessionId?: string;
-}
-
-interface CheckoutErrorResponse {
-  error: string;
-  code?: string;
-  details?: string;
-}
-
-interface StripeMetadata {
-  email: string;
-  credits: string;
-  amount: string;
-  planName?: string;
-  userId?: string;
-  createdAt: string;
-}
-
-// ─── Initialize Stripe ───
-const stripeApiKey: string = process.env.STRIPE_SECRET_KEY || "";
+// ─── Server-only config ───
+const stripeApiKey = process.env.STRIPE_SECRET_KEY;
+const APP_URL = process.env.NEXT_PUBLIC_HOST_URL; // ✅ Same var used elsewhere
 
 if (!stripeApiKey) {
-  console.error("⚠️ STRIPE_SECRET_KEY is not set in environment variables");
+  throw new Error("STRIPE_SECRET_KEY is not set");
+}
+if (!APP_URL) {
+  throw new Error("NEXT_PUBLIC_HOST_URL is not set");
 }
 
 const stripe = new Stripe(stripeApiKey, {
-  apiVersion: "2026-02-25.clover",
+  apiVersion: "2024-06-20" as Stripe.LatestApiVersion, // ✅ Match verifier
   typescript: true,
   maxNetworkRetries: 3,
 });
 
-// ─── Helper Functions ───
-function logCheckoutEvent(event: string, details: Record<string, any>): void {
-  const timestamp = new Date().toISOString();
-  const emoji = event.includes("Error") ? "❌" : "💳";
+// ─── Plan definitions — SINGLE SOURCE OF TRUTH ───
+// ✅ Never trust client-sent amounts. Map credits → price here.
+const PLAN_MAP: Record<number, { amount: number; name: string }> = {
+  20: { amount: 5, name: "Basic" },
+  50: { amount: 12, name: "Standard" },
+  120: { amount: 25, name: "Pro" },
+};
+
+// ─── Types ───
+interface CheckoutRequest {
+  credits: number;        // ✅ Only accept credits from client
+  email?: string;
 }
 
+interface CheckoutSuccess {
+  url: string;
+  sessionId: string;
+}
+
+interface CheckoutError {
+  error: string;
+  code?: string;
+}
+
+// ─── Helpers ───
 function isValidEmail(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
-
-function getPlanFromAmount(amount: number, credits: number): string {
-  if (amount === 5 && credits === 20) return "Basic";
-  if (amount === 12 && credits === 50) return "Standard";
-  if (amount === 25 && credits === 120) return "Pro";
-  return "Custom";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 // ─── POST Handler ───
 export async function POST(
   req: NextRequest
-): Promise<NextResponse<CheckoutSuccessResponse | CheckoutErrorResponse>> {
-  const requestStartTime = Date.now();
-
+): Promise<NextResponse<CheckoutSuccess | CheckoutError>> {
   try {
     const session = await getServerSession(authOptions);
-    const userId = session?.user?.email || undefined;
+    if (!session?.user?.email) {
+      return NextResponse.json(
+        { error: "Please sign in to continue" },
+        { status: 401 }
+      );
+    }
 
     let body: CheckoutRequest;
     try {
@@ -83,60 +72,36 @@ export async function POST(
       );
     }
 
-    const { amount, credits, email: requestEmail, planName } = body;
-    const email = requestEmail || session?.user?.email || "";
+    const { credits, email: requestEmail } = body;
+    const userEmail = session.user.email; // ✅ Trust the session, not the request
 
-    // Validate required fields
-    if (!email || !isValidEmail(email)) {
+    // ✅ Validate credits is a valid plan
+    if (!credits || !Number.isInteger(credits) || !PLAN_MAP[credits]) {
       return NextResponse.json(
-        { error: "Valid email address is required" },
+        { error: "Invalid plan selected" },
         { status: 400 }
       );
     }
 
-    if (!amount || amount <= 0) {
+    const plan = PLAN_MAP[credits]; // ✅ Amount comes from server, not client
+
+    // Only allow the request email to differ if it matches the session
+    if (requestEmail && requestEmail !== userEmail && !isValidEmail(requestEmail)) {
       return NextResponse.json(
-        { error: "Amount must be greater than 0" },
+        { error: "Invalid email" },
         { status: 400 }
       );
     }
 
-    if (!credits || credits <= 0 || !Number.isInteger(credits)) {
-      return NextResponse.json(
-        { error: "Credits must be a positive integer" },
-        { status: 400 }
-      );
-    }
-
-    const baseUrl: string = process.env.NEXT_PUBLIC_BASE_URL || "";
-    if (!baseUrl) {
-      console.error("⚠️ NEXT_PUBLIC_BASE_URL is not set");
-      return NextResponse.json(
-        { error: "Server configuration error" },
-        { status: 500 }
-      );
-    }
-
-    const detectedPlan = planName || getPlanFromAmount(amount, credits);
-
-    const metadata: StripeMetadata = {
-      email,
-      credits: credits.toString(),
-      amount: amount.toString(),
-      planName: detectedPlan,
-      userId: userId || "",
+    // ✅ Metadata keys MUST match verifyStripeSession
+    const metadata: Record<string, string> = {
+      userEmail,                        // ✅ Matches verifier
+      credits: String(credits),         // ✅ Matches verifier
+      amount: String(plan.amount),
+      planName: plan.name,
       createdAt: new Date().toISOString(),
     };
 
-    logCheckoutEvent("Creating checkout session", {
-      email,
-      plan: detectedPlan,
-      amount: `$${amount.toFixed(2)}`,
-      credits,
-      userId: userId || "guest",
-    });
-
-    // ✅ FIXED: Removed automatic_tax and tax_id_collection
     const checkoutSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
@@ -145,51 +110,37 @@ export async function POST(
             currency: "usd",
             product_data: {
               name: `${credits} Interview Credits`,
-              description: `${detectedPlan} Plan - ${credits} AI-powered interview credits`,
+              description: `${plan.name} Plan — ${credits} AI-powered interview credits`,
             },
-            unit_amount: Math.round(amount * 100),
+            unit_amount: Math.round(plan.amount * 100), // ✅ Server-computed amount
           },
           quantity: 1,
         },
       ],
       mode: "payment",
-      success_url: `${baseUrl}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/billing?canceled=true`,
-      customer_email: email,
-      metadata: metadata as unknown as Record<string, string>,
+      success_url: `${APP_URL}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${APP_URL}/billing?canceled=true`,
+      customer_email: userEmail,
+      metadata,                         // ✅ All strings, matches verifier
       billing_address_collection: "auto",
       allow_promotion_codes: true,
-      // ❌ REMOVED THESE:
-      // automatic_tax: { enabled: true },
-      // tax_id_collection: { enabled: true },
-      // invoice_creation: { enabled: true },
     });
 
-    const processingTime = Date.now() - requestStartTime;
-
-    logCheckoutEvent("Checkout session created successfully", {
-      sessionId: checkoutSession.id,
-      plan: detectedPlan,
-      amount: `$${amount}`,
-      credits,
-      processingTimeMs: processingTime,
-    });
+    if (!checkoutSession.url) {
+      throw new Error("Stripe did not return a checkout URL");
+    }
 
     return NextResponse.json({
-      url: checkoutSession.url || "",
+      url: checkoutSession.url,
       sessionId: checkoutSession.id,
     });
-
   } catch (error: unknown) {
-    const processingTime = Date.now() - requestStartTime;
-
+    // ✅ Actually log the error this time
     if (error instanceof Stripe.errors.StripeError) {
-      logCheckoutEvent("Stripe Error", {
+      console.error("[checkout] Stripe error:", {
         type: error.type,
-        message: error.message,
         code: error.code,
-        statusCode: error.statusCode,
-        processingTimeMs: processingTime,
+        message: error.message,
       });
 
       let statusCode = 500;
@@ -205,12 +156,9 @@ export async function POST(
           clientMessage = "Invalid payment request";
           break;
         case "StripeAPIError":
-          statusCode = 502;
-          clientMessage = "Payment service temporarily unavailable";
-          break;
         case "StripeConnectionError":
           statusCode = 502;
-          clientMessage = "Unable to connect to payment service";
+          clientMessage = "Payment service temporarily unavailable";
           break;
         case "StripeRateLimitError":
           statusCode = 429;
@@ -226,23 +174,16 @@ export async function POST(
         {
           error: clientMessage,
           code: error.code || "STRIPE_ERROR",
-          details: process.env.NODE_ENV === "development" ? error.message : undefined,
         },
         { status: statusCode }
       );
     }
 
-    const errorMessage = error instanceof Error ? error.message : "Failed to create checkout session";
-    logCheckoutEvent("Unexpected Error", {
-      message: errorMessage,
-      processingTimeMs: processingTime,
-    });
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[checkout] Unexpected error:", message);
 
     return NextResponse.json(
-      {
-        error: "Failed to create checkout session",
-        details: process.env.NODE_ENV === "development" ? errorMessage : undefined,
-      },
+      { error: "Failed to create checkout session" },
       { status: 500 }
     );
   }

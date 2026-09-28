@@ -1,14 +1,16 @@
 "use client";
 
 import { Loader, Loader2Icon } from "lucide-react";
-import { useSession } from "next-auth/react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 
 import { Button } from "@/components/ui/button";
-import { createInterviewPayloadSchema, type InterviewFormValues } from "@/lib/validations/interview";
+import {
+  createInterviewPayloadSchema,
+  type InterviewFormValues,
+} from "@/lib/validations/interview";
+import { useCredits } from "@/context/CreditsContext"; // ✅
 import QuestionListContainer from "./QuestionListContainer";
 
 type QuestionListProps = {
@@ -23,27 +25,47 @@ type InterviewQuestion = {
 };
 
 function QuestionList({ formData, onCreateLink, credits }: QuestionListProps) {
-  const { update } = useSession();
   const [loading, setLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [questionList, setQuestionList] = useState<InterviewQuestion[]>([]);
+  
+  // ✅ Track mounted state to prevent setState after unmount
+  const isMountedRef = useRef(true);
+
+  // ✅ Consume context for refreshing credits later
+  const { setCredits } = useCredits();
 
   const GenerateQuestionList = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.post("/api/generate-questions", { ...formData, type: formData.type });
+      const response = await axios.post("/api/generate-questions", {
+        ...formData,
+        type: formData.type,
+      });
+      if (!isMountedRef.current) return;
+      
       const content = response.data as unknown;
-      const parsedContent = typeof content === "string" ? JSON.parse(content) : content;
-      setQuestionList((parsedContent as { interviewQuestions?: InterviewQuestion[] }).interviewQuestions ?? []);
+      const parsedContent =
+        typeof content === "string" ? JSON.parse(content) : content;
+      setQuestionList(
+        (parsedContent as { interviewQuestions?: InterviewQuestion[] })
+          .interviewQuestions ?? []
+      );
     } catch {
-      toast.error("Failed to generate questions. Please try again.");
+      if (isMountedRef.current) {
+        toast.error("Failed to generate questions. Please try again.");
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }, [formData]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     void GenerateQuestionList();
+    return () => {
+      isMountedRef.current = false;
+    };
   }, [GenerateQuestionList]);
 
   const onFinish = async () => {
@@ -53,7 +75,9 @@ function QuestionList({ formData, onCreateLink, credits }: QuestionListProps) {
     }
 
     setSaveLoading(true);
-    const interview_id = uuidv4();
+
+    // ✅ Use native crypto.randomUUID() — no uuid library needed
+    const interview_id = crypto.randomUUID();
 
     const validatedPayload = createInterviewPayloadSchema.safeParse({
       ...formData,
@@ -63,22 +87,35 @@ function QuestionList({ formData, onCreateLink, credits }: QuestionListProps) {
     });
 
     if (!validatedPayload.success) {
-      toast.error(validatedPayload.error.issues[0]?.message || "Please provide valid interview details.");
+      toast.error(
+        validatedPayload.error.issues[0]?.message ||
+          "Please provide valid interview details."
+      );
       setSaveLoading(false);
       return;
     }
 
     try {
-      const response = await axios.post("/api/interviews", validatedPayload.data);
+      const response = await axios.post(
+        "/api/interviews",
+        validatedPayload.data
+      );
 
       if (response.data) {
         toast.success("Interview created and credits deducted!");
-        await update();
+        
+        // ✅ Update credits locally — no need for full session refresh
+        setCredits((credits || 0) - 1);
+        
         onCreateLink(interview_id);
       }
     } catch (error) {
-      const errorMsg = axios.isAxiosError(error) ? error.response?.data?.error : "Failed to save interview";
-      toast.error(typeof errorMsg === "string" ? errorMsg : "Failed to save interview");
+      const errorMsg = axios.isAxiosError(error)
+        ? error.response?.data?.error
+        : "Failed to save interview";
+      toast.error(
+        typeof errorMsg === "string" ? errorMsg : "Failed to save interview"
+      );
     } finally {
       setSaveLoading(false);
     }
@@ -91,12 +128,16 @@ function QuestionList({ formData, onCreateLink, credits }: QuestionListProps) {
           <Loader2Icon className="animate-spin text-blue-600" />
           <div>
             <h2 className="font-medium">Generating Interview Questions</h2>
-            <p className="text-sm text-slate-500">Our AI is crafting personalized questions...</p>
+            <p className="text-sm text-slate-500">
+              Our AI is crafting personalized questions...
+            </p>
           </div>
         </div>
       )}
 
-      {!loading && questionList?.length > 0 && <QuestionListContainer questionList={questionList} />}
+      {!loading && questionList?.length > 0 && (
+        <QuestionListContainer questionList={questionList} />
+      )}
 
       <div className="mt-10 flex justify-end">
         <Button
