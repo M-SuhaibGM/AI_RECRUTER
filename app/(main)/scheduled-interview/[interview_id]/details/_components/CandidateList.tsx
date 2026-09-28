@@ -257,7 +257,7 @@ function CandidateList({ candidate }: Props) {
                 <Table>
                   <TableHeader className="bg-slate-50">
                     <TableRow className="hover:bg-transparent border-slate-100">
-                      <TableHead className="w-[100px] font-bold text-slate-800">Rank</TableHead>
+                      <TableHead className="w-25 font-bold text-slate-800">Rank</TableHead>
                       <TableHead className="font-bold text-slate-800">Candidate</TableHead>
                       <TableHead className="font-bold text-slate-800 hidden md:table-cell">Email</TableHead>
                       <TableHead className="text-right font-bold text-slate-800">AI Score</TableHead>

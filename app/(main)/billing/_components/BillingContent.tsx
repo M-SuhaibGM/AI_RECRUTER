@@ -229,7 +229,7 @@ function Billing(): React.ReactElement {
                 <ul className="flex-1 space-y-1.5 mb-4 overflow-hidden">
                   {plan.features.map((feature: string, index: number) => (
                     <li key={index} className="flex items-center gap-2 text-[11px] text-slate-600">
-                      <Check className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                      <Check className="w-3 h-3 text-blue-600 shrink-0" />
                       <span className="truncate">{feature}</span>
                     </li>
                   ))}

@@ -43,7 +43,7 @@ export default function WelcomeContainer() {
 
   if (status === "loading") {
     return (
-      <div className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] z-50 border-b border-blue-100 bg-white/95 backdrop-blur-sm">
+      <div className="fixed top-0 right-0 left-0 md:left-(--sidebar-width) z-50 border-b border-blue-100 bg-white/95 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-3 md:py-4">
           <div className="flex justify-between items-center gap-3">
             <Skeleton className="h-9 w-40 bg-slate-100" />
@@ -59,7 +59,7 @@ export default function WelcomeContainer() {
   const firstName = user?.name?.split(" ")[0] || "User";
 
   return (
-    <div className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] z-50 border-b border-blue-100 bg-white/95 backdrop-blur-sm shadow-sm">
+    <div className="fixed top-0 right-0 left-0 md:left-(--sidebar-width) z-50 border-b border-blue-100 bg-white/95 backdrop-blur-sm shadow-sm">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-3 md:py-4">
         <div className="flex justify-between items-center gap-3">
           <div className="min-w-0 flex-1 flex items-center gap-3">

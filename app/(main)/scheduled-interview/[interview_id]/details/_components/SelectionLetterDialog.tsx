@@ -218,7 +218,7 @@ The Recruitment Team at ${companyName}`;
                     <span>{candidate?.userEmail || "candidate@email.com"}</span>
                   </div>
                 </div>
-                <div className="p-6 text-sm leading-relaxed text-slate-700 whitespace-pre-line overflow-y-auto max-h-[400px] font-sans">
+                <div className="p-6 text-sm leading-relaxed text-slate-700 whitespace-pre-line overflow-y-auto max-h-100 font-sans">
                   {letterTemplate}
                 </div>
               </div>
@@ -259,7 +259,7 @@ The Recruitment Team at ${companyName}`;
                 </div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Recipient</span>
-                  <span className="font-medium text-slate-700 truncate max-w-[150px]">
+                  <span className="font-medium text-slate-700 truncate max-w-37.5">
                     {candidate?.userEmail || "N/A"}
                   </span>
                 </div>

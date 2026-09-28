@@ -126,7 +126,7 @@ function CandidateFeedbackDialog({ candidate }: CandidateFeedbackDialogProps): R
 
       <DialogContent className="max-w-2xl rounded-3xl p-0 overflow-hidden border-none outline-none">
         {/* ─── Header ─── */}
-        <DialogHeader className="p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+        <DialogHeader className="p-6 bg-linear-to-r from-blue-600 to-indigo-600 text-white">
           <div className="flex justify-between items-center">
             <DialogTitle className="text-xl font-bold flex items-center gap-2 text-white">
               <Award className="w-5 h-5" /> Interview Performance Report

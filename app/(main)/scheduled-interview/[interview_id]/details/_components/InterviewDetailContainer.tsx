@@ -211,7 +211,7 @@ function InterviewDetailContainer({ interviewDetail }: Props) {
                     key={index}
                     className="group flex items-start gap-4 p-4 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50/50 transition-colors cursor-default"
                   >
-                    <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                    <span className="shrink-0 w-7 h-7 rounded-lg bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
                       {index + 1}
                     </span>
                     <div className="flex-1 min-w-0">
