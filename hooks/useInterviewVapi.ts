@@ -106,6 +106,45 @@ const NORMAL_END_KEYWORDS = [
   "meeting has ended",
 ];
 
+// ─── Turn-taking / patience configuration ───
+// These feed BOTH the system prompt wording (what the model is told to do)
+// AND the actual Vapi call config (startSpeakingPlan / stopSpeakingPlan /
+// transcriber.endpointing, which control the platform's own turn-taking —
+// the prompt text alone cannot stop Vapi from cutting the candidate off,
+// since endpointing happens before the transcript ever reaches the model).
+// Keeping them as one shared source of truth avoids the prompt claiming a
+// patience window the platform isn't actually configured to honor.
+//
+// ⚠️ A genuine 30-40s silence tolerance is NOT achievable here. Vapi's API
+// enforces hard server-side caps on this whole layer, confirmed by:
+//   - transcriber.endpointing rejected above 500ms with a live 400:
+//     "assistant.transcriber.endpointing must not be greater than 500"
+//   - startSpeakingPlan.waitSeconds rejected above 5s per Vapi's own
+//     support forum (a user's waitSeconds: 180 request was rejected;
+//     told the ceiling is 5s: https://support.vapi.ai/t/28935279)
+// smartEndpointingPlan.waitFunction's own output cap isn't documented, so
+// it may reject a large computed wait too — increase SILENCE_TRANSITION_SECONDS
+// gradually and watch for further "start-method-error" 400s rather than
+// jumping straight back to 30. 5s is a safe, already-longer-than-default
+// starting point; the prompt wording below uses this same constant so it
+// never overstates what the platform is actually configured to wait for.
+const SILENCE_TRANSITION_SECONDS = 5; // how long the candidate can be silent before the AI assumes they're done and offers to move on — capped by real Vapi limits, see note above
+const RESPONSE_WAIT_SECONDS = 2.5; // minimum pause before the AI starts speaking at all (startSpeakingPlan.waitSeconds) — must stay below Vapi's confirmed 5s ceiling
+const CALL_IDLE_TIMEOUT_SECONDS = 60; // whole-call "hang up if totally silent" timeout — must stay comfortably above SILENCE_TRANSITION_SECONDS, or Vapi's own idle-hangup can end the call while the candidate is still mid-thought
+
+// ✅ FIX (structural, not just prompt wording): every previous fix here was
+// "ask the model nicely not to combine the click-line with the next
+// question" — and it kept doing it anyway, repeatedly, because the full
+// question list was embedded in the system prompt from the start. The
+// model already had the next question's text sitting in its own context
+// the whole time, so nothing structurally stopped it from previewing it.
+// The actual fix is to never give the model more than the CURRENT question
+// at any point. Future questions are now only ever delivered via this
+// distinct, unmistakable instruction tag, sent exactly once, exactly when
+// the button is clicked — the model literally cannot say a question it was
+// never given.
+const INSTRUCTION_TAG = "[SYSTEM INSTRUCTION - NOT SPOKEN BY CANDIDATE]:";
+
 // ─── Custom Hook ───
 export function useInterviewVapi({
   interviewInfo,
@@ -138,6 +177,15 @@ export function useInterviewVapi({
   const currentQuestionIndexRef = useRef<number>(0);
   const answeredQuestionsRef = useRef<number>(0);
   const interviewCompletedRef = useRef<boolean>(false);
+  // ✅ Guards the auto-end-after-final-message logic below so it only ever
+  // fires once (the model may, in principle, produce more than one
+  // "speech-end" after completion in edge cases — this prevents a double
+  // vapi.stop() call).
+  const autoEndTriggeredRef = useRef<boolean>(false);
+  // ✅ Guards sending the first question exactly once per call — the model
+  // no longer receives any question text via the system prompt, so this is
+  // the only way it ever learns what question 1 is.
+  const firstQuestionSentRef = useRef<boolean>(false);
 
   // Conversation refs
   const conversationRef = useRef<string | null>(null);
@@ -219,21 +267,50 @@ export function useInterviewVapi({
     }
   }, []);
 
-  /* ─── Utility: normalize conversation ─── */
-  const normalizeConversation = useCallback((raw: unknown): string | null => {
-    if (!raw) return null;
-    try {
-      if (typeof raw === "string") {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? JSON.stringify(parsed) : raw;
-      }
-      if (Array.isArray(raw)) return JSON.stringify(raw);
-      return JSON.stringify(raw);
-    } catch (error) {
-      console.error("Failed to normalize Vapi conversation:", error);
-      return null;
-    }
+  /* ─── Utility: strip system prompt & internal instruction messages ───
+     Vapi's conversation array always includes model.messages[0] (our full
+     system prompt, role "system") and, going forward, every
+     "[SYSTEM INSTRUCTION...]" message we inject ourselves (role "user",
+     used purely to hand the model the next question — never something the
+     candidate actually said). A real screenshot showed both leaking into
+     the visible "Live Transcript" UI, displayed as if the AI had spoken
+     the system prompt aloud and as if the candidate had typed our internal
+     automation text. Filtering here means every consumer of `conversation`
+     (transcript display, feedback generation, etc.) automatically gets a
+     clean view with no extra work on their end. */
+  const filterTranscriptEntries = useCallback((arr: unknown[]): unknown[] => {
+    return arr.filter((entry) => {
+      if (!entry || typeof entry !== "object") return true;
+      const e = entry as Record<string, unknown>;
+      const role = typeof e.role === "string" ? e.role : "";
+      if (role === "system") return false;
+      const content =
+        (typeof e.content === "string" && e.content) ||
+        (typeof e.message === "string" && e.message) ||
+        "";
+      if (role === "user" && content.startsWith(INSTRUCTION_TAG)) return false;
+      return true;
+    });
   }, []);
+
+  /* ─── Utility: normalize conversation ─── */
+  const normalizeConversation = useCallback(
+    (raw: unknown): string | null => {
+      if (!raw) return null;
+      try {
+        if (typeof raw === "string") {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? JSON.stringify(filterTranscriptEntries(parsed)) : raw;
+        }
+        if (Array.isArray(raw)) return JSON.stringify(filterTranscriptEntries(raw));
+        return JSON.stringify(raw);
+      } catch (error) {
+        console.error("Failed to normalize Vapi conversation:", error);
+        return null;
+      }
+    },
+    [filterTranscriptEntries]
+  );
 
   const updateConversation = useCallback(
     (raw: unknown) => {
@@ -280,83 +357,93 @@ export function useInterviewVapi({
   }, []);
 
   /* ─── Build system prompt ─── */
+  // ✅ FIX (structural, not just prompt wording): every previous fix here
+  // was "ask the model nicely not to combine the click-line with the next
+  // question" — and it kept doing it anyway, repeatedly, because the full
+  // question list was embedded in the system prompt from the start. The
+  // model already had the next question's text sitting in its own context
+  // the whole time, so nothing structurally stopped it from previewing it.
+  // The actual fix is to never give the model more than the CURRENT
+  // question at any point. Future questions are now only ever delivered
+  // via a distinct, unmistakable instruction message (INSTRUCTION_TAG,
+  // declared at module scope above), sent exactly once, exactly when the
+  // button is clicked — the model literally cannot say a question it was
+  // never given.
+  const buildAskQuestionInstruction = useCallback(
+    (questionText: string) =>
+      `${INSTRUCTION_TAG} Ask the candidate EXACTLY this question, word for word, as your ENTIRE next message, with nothing else added: "${questionText}"`,
+    []
+  );
+
+  const buildCompleteInstruction = useCallback(
+    (endingLine: string) =>
+      `${INSTRUCTION_TAG} The candidate clicked "Next Question" after the final question. Say EXACTLY this as your ENTIRE next message, then stop talking entirely: "${endingLine}"`,
+    []
+  );
+
+  const getLocalizedPrompts = useCallback((langCode: string) => {
+    const sysLang: Record<string, string> = {
+      "en-US": "English",
+      "hi-IN": "Hindi (हिंदी). Always respond in Hindi script.",
+      "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
+    };
+    const pleaseClickNextPrompts: Record<string, string> = {
+      "en-US": "Thank you for your answer. Please click the \"Next Question\" button whenever you're ready to continue — I'll wait right here.",
+      "hi-IN": "आपके उत्तर के लिए धन्यवाद। जब भी आप तैयार हों, कृपया \"अगला प्रश्न\" बटन दबाएं — मैं यहीं प्रतीक्षा करूंगा।",
+      "ur-PK": "آپ کے جواب کا شکریہ۔ جب بھی آپ تیار ہوں، براہ کرم \"اگلا سوال\" بٹن دبائیں — میں یہیں انتظار کروں گا۔",
+    };
+    const repeatPrompts: Record<string, string> = {
+      "en-US": "Of course, let me repeat the question.",
+      "hi-IN": "बिल्कुल, मैं प्रश्न दोहराता हूं।",
+      "ur-PK": "بالکل، میں سوال دوبارہ دہراتا ہوں۔",
+    };
+    const endingPrompts: Record<string, string> = {
+      "en-US": "Thank you for completing the interview! Your responses have been recorded. Have a great day!",
+      "hi-IN": "साक्षात्कार पूरा करने के लिए धन्यवाद! आपके उत्तर रिकॉर्ड कर लिए गए हैं। आपका दिन शुभ हो!",
+      "ur-PK": "انٹرویو مکمل کرنے کا شکریہ! آپ کے جوابات ریکارڈ کر لیے گئے ہیں۔ آپ کا دن اچھا گزرے!",
+    };
+    return {
+      language: sysLang[langCode] || sysLang["en-US"],
+      pleaseClickNext: pleaseClickNextPrompts[langCode] || pleaseClickNextPrompts["en-US"],
+      repeat: repeatPrompts[langCode] || repeatPrompts["en-US"],
+      ending: endingPrompts[langCode] || endingPrompts["en-US"],
+    };
+  }, []);
+
   const buildSystemPrompt = useCallback(
     (langCode: string): string => {
-      const sysLang: Record<string, string> = {
-        "en-US": "English",
-        "hi-IN": "Hindi (हिंदी). Always respond in Hindi script.",
-        "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
-      };
-      const transitionPrompts: Record<string, string> = {
-        "en-US": "Thank you for your answer. Shall we move to the next question?",
-        "hi-IN": "आपके उत्तर के लिए धन्यवाद। क्या हम अगले प्रश्न की ओर बढ़ें?",
-        "ur-PK": "آپ کے جواب کا شکریہ۔ کیا ہم اگلے سوال کی طرف بڑھیں؟",
-      };
-      const repeatPrompts: Record<string, string> = {
-        "en-US": "Of course, let me repeat the question.",
-        "hi-IN": "बिल्कुल, मैं प्रश्न दोहराता हूं।",
-        "ur-PK": "بالکل، میں سوال دوبارہ دہراتا ہوں۔",
-      };
-      const endingPrompts: Record<string, string> = {
-        "en-US": "Thank you for completing the interview! Your responses have been recorded. Have a great day!",
-        "hi-IN": "साक्षात्कार पूरा करने के लिए धन्यवाद! आपके उत्तर रिकॉर्ड कर लिए गए हैं। आपका दिन शुभ हो!",
-        "ur-PK": "انٹرویو مکمل کرنے کا شکریہ! آپ کے جوابات ریکارڈ کر لیے گئے ہیں۔ آپ کا دن اچھا گزرے!",
-      };
-
-      const language = sysLang[langCode] || sysLang["en-US"];
-      const transition = transitionPrompts[langCode] || transitionPrompts["en-US"];
-      const repeat = repeatPrompts[langCode] || repeatPrompts["en-US"];
-      const ending = endingPrompts[langCode] || endingPrompts["en-US"];
-
-      const questionList = questions
-        .map((q, i) => `${i + 1}. ${q.question}`)
-        .join("\n");
+      const { language, pleaseClickNext, repeat, ending } = getLocalizedPrompts(langCode);
 
       return `You are an AI recruiter. Conduct the ENTIRE interview in ${language}.
 
-INTERVIEW QUESTIONS (ask one by one):
-${questionList}
+LANGUAGE (MOST IMPORTANT):
+- Speak ONLY in ${language} throughout the entire interview. NEVER switch to English or any other language.
+- Speak in a calm, measured, unhurried pace. Pause briefly between sentences. Clearly enunciate every word. Do not rush.
 
-CRITICAL RULES - FOLLOW STRICTLY:
+YOU DO NOT KNOW ANY INTERVIEW QUESTIONS IN ADVANCE. You will be told the current question, one at a time, ONLY via a message that starts with the exact tag "${INSTRUCTION_TAG}". Such a message is NOT something the candidate said — it is an automated command from the interview system, and it is the ONLY source of truth for what to do next. You must NEVER guess, invent, preview, or ask any question you have not been explicitly given this way, even if the conversation seems to be heading toward one.
 
-1. LANGUAGE RULE (MOST IMPORTANT):
-   - Speak ONLY in ${language} throughout the entire interview.
-   - NEVER switch to English or any other language.
-   - Speak in a calm, measured, and unhurried pace.
-   - Pause briefly between sentences to sound natural.
-   - Do not rush through questions. Clearly enunciate every word.
+THE INTERVIEW LOOP — repeat these exact steps for every question, including the 1st and the last, with NO exceptions, no matter how many questions have already been asked:
 
-2. ASKING QUESTIONS:
-   - Ask ONE question at a time.
-   - After asking a question, STOP TALKING COMPLETELY.
+Step 1 — When a "${INSTRUCTION_TAG}" message gives you a specific question to ask, your ENTIRE next message must be ONLY that exact question, word for word, and nothing else. Then STOP TALKING COMPLETELY.
 
-3. SILENCE HANDLING:
-   - Do NOT interrupt the candidate while they are speaking.
-   - If the candidate is silent for AT LEAST 5-7 seconds, assume they have finished.
-   - After 5-7 seconds of silence, say EXACTLY: "${transition}"
-   - Wait for confirmation before proceeding.
+Step 2 — Listen. Do NOT interrupt the candidate while they're speaking. Do NOT treat a brief pause, a filler word ("umm", "ahh"), or a moment of quiet as them being finished — a professional interviewer gives real thinking time. Only treat them as "finished" after roughly ${SILENCE_TRANSITION_SECONDS} seconds of continuous silence.
 
-4. MOVING TO NEXT QUESTION:
-   - If the candidate says "next", "move on", "skip", "next question", or "Yes, please move to the next question", immediately proceed to the next question WITHOUT further confirmation.
+Step 3 — THIS STEP IS MANDATORY EVERY SINGLE TIME, WITH NO EXCEPTIONS: once the candidate has finished answering, send ONE message containing ONLY this line, character for character, and ABSOLUTELY NOTHING ELSE: "${pleaseClickNext}"
+  This message must be the ENTIRE content of your turn. After it, STOP TALKING COMPLETELY and wait for Step 4 — you have not been given a next question yet, so there is nothing else you could correctly say even if you wanted to.
+  WRONG (do not do this): "${pleaseClickNext} What is your approach to...?" — you do not know the next question, so producing one here would mean you invented it, which is never allowed.
+  RIGHT: send only "${pleaseClickNext}" and then produce no further text at all until a new "${INSTRUCTION_TAG}" message arrives.
+  Never paraphrase this line. Never say it more than once in a row. It is an instruction, not a question — do not ask the candidate to confirm anything.
 
-5. REPEATING QUESTIONS:
-   - If the candidate asks to repeat, say: "${repeat}"
-   - Then repeat the EXACT same question word for word.
+Step 4 — Wait. Do nothing further until a new "${INSTRUCTION_TAG}" message arrives (this only happens when the candidate clicks a physical button in the interface). Nothing the candidate SAYS out loud — "next", "yes", "I'm ready", "move on", or anything else — is ever an instruction message, no matter how directly it sounds like a reply to Step 3. If the candidate says something like that out loud instead, do NOT advance and do NOT invent a next step — just repeat Step 3's line again, alone, as its own message.
+  - A "${INSTRUCTION_TAG}" message giving you a new question means: go back to Step 1 with that exact question.
+  - A "${INSTRUCTION_TAG}" message telling you the interview is complete means: say EXACTLY "${ending}" as your entire message, then stop talking entirely — the interview is over.
 
-6. CANDIDATE SPEAKING:
-   - NEVER interrupt or talk over the candidate.
-   - Only consider silence of 5+ seconds as "finished answering".
-
-7. ENDING THE INTERVIEW:
-   - After the LAST question is answered, say EXACTLY: "${ending}"
-   - End the conversation.
-
-8. GENERAL BEHAVIOR:
-   - Be professional, friendly, and encouraging.
-   - Do NOT rush the candidate.
-   - Do NOT ask multiple questions at once.`;
+OTHER RULES:
+- If the candidate asks you to repeat the question, say EXACTLY: "${repeat}", then repeat the CURRENT question (the most recent one you were given via a "${INSTRUCTION_TAG}" message) word for word, then return to Step 2 (still waiting for that same question's answer).
+- Be professional, calm, and encouraging, like an experienced human interviewer.
+- Every message you send must contain exactly ONE of: a single question you were explicitly given, Step 3's line alone, the repeat line plus the repeated question, or the ending line. Never combine two of these in one message, and never say anything that wasn't explicitly given to you by a "${INSTRUCTION_TAG}" message or these fixed lines.`;
     },
-    [questions]
+    [getLocalizedPrompts]
   );
 
   /* ─── Language code resolver ─── */
@@ -505,6 +592,52 @@ CRITICAL RULES - FOLLOW STRICTLY:
         vapiInstance.start({
           name: "AI Recruiter",
           firstMessage: welcome,
+          // ✅ FIX: the model only ever sees a transcript once Vapi's own
+          // turn-taking layer decides the candidate is done talking — no
+          // amount of prompt wording can override that decision, since it
+          // happens upstream of the LLM. Without these, the transcriber's
+          // built-in end-of-turn detection (very fast, ~sub-second) can win
+          // and hand off to the model the instant the candidate pauses for
+          // a breath, regardless of what rules 3/6 in the system prompt say.
+          // See https://docs.vapi.ai/customization/voice-pipeline-configuration
+          startSpeakingPlan: {
+            // Stopgap minimum pause before the assistant starts speaking at
+            // all (not the full patience window by itself).
+            waitSeconds: RESPONSE_WAIT_SECONDS,
+            // LiveKit smart endpointing (English) maps "confidence the
+            // candidate is still talking" (x, 0-1) to a wait in ms. Low
+            // confidence (finished, punctuation, clear stop) -> short wait;
+            // high confidence (mid-thought, filler word, trailing off) ->
+            // wait close to our full SILENCE_TRANSITION_SECONDS budget.
+            smartEndpointingPlan:
+              languageCode === "en-US"
+                ? {
+                    provider: "livekit",
+                    waitFunction: `500 + ${(SILENCE_TRANSITION_SECONDS - 0.5) * 1000} * x`,
+                  }
+                : undefined,
+            // Fallback endpointing for non-English, where LiveKit smart
+            // endpointing isn't supported yet.
+            transcriptionEndpointingPlan:
+              languageCode !== "en-US"
+                ? {
+                    onPunctuationSeconds: 0.5,
+                    onNoPunctuationSeconds: SILENCE_TRANSITION_SECONDS,
+                    onNumberSeconds: 1,
+                  }
+                : undefined,
+          },
+          stopSpeakingPlan: {
+            // Require a couple of real words (not just a stray "umm") before
+            // the candidate's speech is treated as an interruption of the AI.
+            numWords: 2,
+            voiceSeconds: 0.4,
+            backoffSeconds: 1.5,
+          },
+          // Whole-call idle-hangup timeout. Must stay comfortably above
+          // SILENCE_TRANSITION_SECONDS, or Vapi could end the call while the
+          // candidate is still mid-thought on a single question.
+          silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS,
           transcriber: {
             provider: "deepgram",
             model: "nova-2",
@@ -512,6 +645,16 @@ CRITICAL RULES - FOLLOW STRICTLY:
               languageCode === "hi-IN" ? "hi"
                 : languageCode === "ur-PK" ? "ur"
                   : "en-US",
+            // Deepgram's own trailing-silence-before-finalizing setting
+            // (ms). Vapi's API enforces a hard server-side cap of 500ms
+            // here ("assistant.transcriber.endpointing must not be greater
+            // than 500") — confirmed by an actual 400 response, so this is
+            // NOT tunable up to match SILENCE_TRANSITION_SECONDS. The real
+            // patience budget lives entirely in startSpeakingPlan above;
+            // this field only affects how quickly Deepgram finalizes each
+            // individual transcript chunk, not when Vapi decides the
+            // candidate's turn is over.
+            endpointing: 500,
           },
           voice: {
             provider: "vapi",
@@ -520,6 +663,17 @@ CRITICAL RULES - FOLLOW STRICTLY:
           model: {
             provider: "openai",
             model: "gpt-4o-mini",
+            // ✅ Lower temperature (default is usually ~0.7-1.0) makes the
+            // model stick closer to the literal instruction ("send ONLY
+            // this one line and stop") instead of creatively continuing on
+            // into content nobody asked for yet — a real session showed the
+            // model appending the next interview question directly after
+            // the click-next line in the SAME message, before any click had
+            // happened. This won't eliminate that on its own (see the
+            // strengthened Step 3 wording above), but combined with the
+            // prompt fix it meaningfully reduces the model's tendency to
+            // keep talking past the one required sentence.
+            temperature: 0.3,
             messages: [{ role: "system", content: buildSystemPrompt(languageCode) }],
           },
         });
@@ -567,6 +721,8 @@ CRITICAL RULES - FOLLOW STRICTLY:
     currentQuestionIndexRef.current = 0;
     answeredQuestionsRef.current = 0;
     interviewCompletedRef.current = false;
+    autoEndTriggeredRef.current = false;
+    firstQuestionSentRef.current = false;
     feedbackCalledRef.current = false;
     feedbackInProgressRef.current = false;
     hasGreetedRef.current = false;
@@ -615,7 +771,8 @@ CRITICAL RULES - FOLLOW STRICTLY:
       }
     });
 
-    /* ─── Silence detection (UI-only) ─── */
+    /* ─── First question delivery + silence detection (UI-only) +
+       auto-end after final message ─── */
     vapi.on("speech-end", () => {
       if (destroyed) return;
 
@@ -623,6 +780,68 @@ CRITICAL RULES - FOLLOW STRICTLY:
         setStartTimer(true);
         setResetTimer(true);
         setAiIsSpeaking(false);
+      }
+
+      // ✅ FIX: previously this was sent from the "call-start" handler, the
+      // instant the call connected. A real session got stuck after only the
+      // fixed greeting ("Hi, {name}!") played and then went silent — Vapi's
+      // default firstMessageMode ('assistant-speaks-first') plays that
+      // greeting as a fixed, non-LLM string, so sending our instruction that
+      // early can race the data channel/TTS pipeline actually being ready to
+      // accept and act on it. This first "speech-end" reliably marks the
+      // moment that fixed greeting has finished playing — both the call and
+      // the pipeline are unambiguously ready by then, so this is a safer,
+      // later point to hand over question 1. Guarded by firstQuestionSentRef
+      // so it only ever fires once per call, and it's intentionally checked
+      // BEFORE the auto-end/completion check below, since they're mutually
+      // exclusive events within a single call.
+      if (!firstQuestionSentRef.current && questions.length > 0) {
+        firstQuestionSentRef.current = true;
+        try {
+          vapi.send({
+            type: "add-message",
+            message: {
+              role: "user",
+              content: buildAskQuestionInstruction(questions[0].question),
+            },
+          });
+        } catch (error) {
+          console.error("Failed to send first question instruction:", error);
+        }
+      }
+
+      // ✅ FIX: previously the call just stayed "live" forever after the
+      // model spoke its ending line — the session only ended when the
+      // person manually clicked "End Session". `speech-end` here fires
+      // once the ASSISTANT finishes speaking (see `aiIsSpeaking` above),
+      // so the first time this fires after `interviewCompletedRef` has
+      // been set (which only happens once, in markInterviewCompleted(),
+      // triggered by clicking "Next Question" on the LAST question) is
+      // reliably the moment the ending line's audio has finished playing.
+      // `autoEndTriggeredRef` ensures this only runs once even if further
+      // speech-end events fire for any reason after completion.
+      if (interviewCompletedRef.current && !autoEndTriggeredRef.current) {
+        autoEndTriggeredRef.current = true;
+        setTimeout(() => {
+          if (destroyed || !isMountedRef.current) return;
+          if (!isCallActiveRef.current) return;
+          try {
+            // Intentional stop, not a cleanup teardown — isCleaningUpRef
+            // stays false so call-end's normal feedback-generation path
+            // runs, exactly as if the person had clicked "End Session".
+            vapi.stop();
+          } catch (error) {
+            console.error("Failed to auto-stop call after final message:", error);
+            isCallActiveRef.current = false;
+            void generateFeedback(
+              "Interview Completed Normally",
+              100,
+              conversationRef.current,
+              tabSwitchCountRef.current,
+              switchTimestampsRef.current
+            );
+          }
+        }, 1500); // small buffer so the tail of the TTS audio isn't cut off
       }
 
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
@@ -809,6 +1028,7 @@ CRITICAL RULES - FOLLOW STRICTLY:
     generateFeedback,
     clearTimers,
     updateConversation,
+    buildAskQuestionInstruction,
   ]);
 
   /* ─── Handle "repeat" ─── */
@@ -855,16 +1075,24 @@ CRITICAL RULES - FOLLOW STRICTLY:
     }
 
     try {
-      // ✅ Minor fix: send an unambiguous instruction depending on whether
-      // this is the last question, instead of always saying "move to the
-      // next question" even when there isn't one.
+      // ✅ FIX: previously this sent a fixed literal string ("Yes, please
+      // move to the next question immediately.") and relied on the model
+      // already knowing the next question's text from the system prompt's
+      // embedded question list. Since that list has been removed (see
+      // buildSystemPrompt), the model now has genuinely no way to know the
+      // next question until THIS message tells it — which is exactly what
+      // stops it from ever previewing/combining a question it hasn't been
+      // given yet.
+      const { ending } = getLocalizedPrompts(getLanguageCode());
+      const content = isLastQuestion
+        ? buildCompleteInstruction(ending)
+        : buildAskQuestionInstruction(questions[currentQuestionIndexRef.current].question);
+
       vapi.send({
         type: "add-message",
         message: {
           role: "user",
-          content: isLastQuestion
-            ? "Yes, that was my final answer. Please conclude the interview now."
-            : "Yes, please move to the next question immediately.",
+          content,
         },
       });
       toast.success(isLastQuestion ? "Finishing interview..." : "Moving to next question...");
@@ -872,7 +1100,15 @@ CRITICAL RULES - FOLLOW STRICTLY:
       console.error("Failed to move to next question:", error);
       toast.error("Failed to skip question.");
     }
-  }, [totalQuestions, markInterviewCompleted]);
+  }, [
+    totalQuestions,
+    markInterviewCompleted,
+    getLocalizedPrompts,
+    getLanguageCode,
+    buildCompleteInstruction,
+    buildAskQuestionInstruction,
+    questions,
+  ]);
 
   /* ─── Stop interview ─── */
   const handleStop = useCallback(() => {
