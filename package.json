@@ -27,6 +27,7 @@
     "@tidbcloud/prisma-adapter": "^6.17.0",
     "@tidbcloud/serverless": "^0.3.0",
     "@vapi-ai/web": "^2.5.2",
+    "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
     "class-variance-authority": "^0.7.1",

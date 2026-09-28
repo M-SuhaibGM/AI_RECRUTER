@@ -43,8 +43,6 @@ export default function InterviewCard({
     });
   };
 
-
-
   return (
     <div
       key={index}
@@ -75,7 +73,7 @@ export default function InterviewCard({
 
           <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 group-hover:border-blue-100 group-hover:bg-blue-50/50 group-hover:text-blue-600 transition-all duration-300">
             <Calendar className="w-3.5 h-3.5" />
-            {moment(interview?.created_at).format("MMM DD, YYYY")}
+            {moment(interview?.createdAt).format("MMM DD, YYYY")}
           </div>
         </div>
 

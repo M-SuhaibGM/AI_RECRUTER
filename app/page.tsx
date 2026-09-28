@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import {
   CheckCircle2, PlayCircle, Sparkles, Mic,
   BarChart3, Users, X, ArrowRight, Zap,
-  Shield, Globe, ChevronRight, Bot
+  Shield, Globe, ChevronRight, Bot,
+  Menu, // ← add
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -260,12 +261,13 @@ const PLANS: Plan[] = [
 export default function LandingPage(): JSX.Element {
   const router = useRouter();
   const [modal, setModal] = useState<boolean>(false);
+  const [mobileMenu, setMobileMenu] = useState<boolean>(false);
   const { status } = useSession();
   const heroRef = useRef<HTMLDivElement | null>(null);
 
-  const s1 = useReveal(), 
-        s2 = useReveal(), 
-        s3 = useReveal();
+  const s1 = useReveal(),
+    s2 = useReveal(),
+    s3 = useReveal();
 
   const go = (): void => router.push(status === "authenticated" ? "/dashboard" : "/auth/login");
 
@@ -296,10 +298,12 @@ export default function LandingPage(): JSX.Element {
         </div>
 
         {/* ░░ NAVBAR ░░ */}
+        {/* ░░ NAVBAR ░░ */}
         <header className="sticky top-0 z-50"
           style={{ background: "rgba(248,250,252,.92)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(0,0,0,.07)" }}>
-          <div className="max-w-7xl mx-auto flex h-[62px] items-center justify-between px-6 md:px-10">
+          <div className="max-w-7xl mx-auto flex h-[62px] items-center justify-between px-4 sm:px-6 md:px-10">
 
+            {/* Logo */}
             <div className="flex items-center gap-2.5 cursor-pointer select-none" onClick={() => router.push("/")}>
               <div className="w-8 h-8 rounded-xl flex items-center justify-center"
                 style={{ background: "linear-gradient(135deg,#1d4ed8,#3b82f6)", boxShadow: "0 4px 14px rgba(37,99,235,.35)" }}>
@@ -310,13 +314,15 @@ export default function LandingPage(): JSX.Element {
               </span>
             </div>
 
+            {/* Desktop nav links */}
             <nav className="hidden md:flex items-center gap-9">
               {[["#features", "Features"], ["#pricing", "Pricing"], ["#whatsnew", "What's New"]].map(([h, l]) => (
                 <a key={h} href={h} className="nlink">{l}</a>
               ))}
             </nav>
 
-            <div className="flex items-center gap-2.5">
+            {/* Desktop auth buttons */}
+            <div className="hidden md:flex items-center gap-2.5">
               {status === "loading" ? (
                 <><Skeleton className="h-9 w-18 rounded-xl bg-slate-200" /><Skeleton className="h-9 w-28 rounded-xl bg-slate-200" /></>
               ) : (
@@ -332,7 +338,67 @@ export default function LandingPage(): JSX.Element {
                 </>
               )}
             </div>
+
+            {/* Mobile: compact CTA + hamburger */}
+            <div className="flex md:hidden items-center gap-2">
+              {status === "loading" ? (
+                <Skeleton className="h-9 w-20 rounded-xl bg-slate-200" />
+              ) : status !== "authenticated" ? (
+                <button className="btn-blue px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5" onClick={go}>
+                  Get Started <ArrowRight className="w-3 h-3" />
+                </button>
+              ) : (
+                <button className="btn-outline px-3.5 py-2 rounded-xl text-xs" onClick={go}>
+                  Dashboard
+                </button>
+              )}
+              <button
+                aria-label="Toggle menu"
+                aria-expanded={mobileMenu}
+                onClick={() => setMobileMenu((v) => !v)}
+                className="w-9 h-9 flex items-center justify-center rounded-xl transition-colors"
+                style={{ border: "1.5px solid rgba(0,0,0,.1)", background: "#fff", color: "#0c0f1a" }}
+              >
+                {mobileMenu ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
+
+          {/* Mobile dropdown panel */}
+          {mobileMenu && (
+            <div className="md:hidden border-t" style={{ borderColor: "rgba(0,0,0,.07)", background: "#fff" }}>
+              <nav className="flex flex-col px-5 py-3">
+                {[["#features", "Features"], ["#pricing", "Pricing"], ["#whatsnew", "What's New"]].map(([h, l]) => (
+                  <a
+                    key={h}
+                    href={h}
+                    onClick={() => setMobileMenu(false)}
+                    className="py-3.5 text-sm font-medium border-b last:border-b-0"
+                    style={{ color: "#374151", borderColor: "rgba(0,0,0,.05)" }}
+                  >
+                    {l}
+                  </a>
+                ))}
+
+                <div className="pt-4 pb-2 flex flex-col gap-2.5">
+                  <button
+                    className="btn-outline w-full py-3 rounded-xl text-sm"
+                    onClick={() => { setMobileMenu(false); go(); }}
+                  >
+                    {status === "authenticated" ? "Go to Dashboard" : "Sign in"}
+                  </button>
+                  {status !== "authenticated" && (
+                    <button
+                      className="btn-blue w-full py-3 rounded-xl text-sm flex items-center justify-center gap-2"
+                      onClick={() => { setMobileMenu(false); go(); }}
+                    >
+                      Get Started <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </nav>
+            </div>
+          )}
         </header>
 
         {/* ░░ HERO ░░ */}
@@ -394,13 +460,13 @@ export default function LandingPage(): JSX.Element {
                   </div>
                 </div>
                 {/* Fixed line 396: Replaced <img> with optimized Next.js <Image /> */}
-                <Image 
-                  src="/dashboard.jpeg" 
-                  alt="Dashboard" 
-                  width={1200} 
-                  height={675} 
-                  className="w-full h-auto block" 
-                  priority 
+                <Image
+                  src="/dashboard.jpeg"
+                  alt="Dashboard"
+                  width={1200}
+                  height={675}
+                  className="w-full h-auto block"
+                  priority
                 />
               </div>
             </div>
@@ -436,7 +502,7 @@ export default function LandingPage(): JSX.Element {
                 Everything you need<br />
                 <span style={{ color: "#2563eb" }}>to scale your hiring</span>
               </h2>
-              <p className="text-base max-w-lg mx-auto" style={{color: "#6b7280"}}>
+              <p className="text-base max-w-lg mx-auto" style={{ color: "#6b7280" }}>
                 One integrated platform — every tool a modern recruiting team depends on.
               </p>
             </div>
@@ -569,9 +635,9 @@ export default function LandingPage(): JSX.Element {
                       {(links as [string, string][]).map(([h, l]) => (
                         h === "c"
                           ? <button key={l} onClick={() => setModal(true)} className="block text-sm transition-colors"
-                              style={{ color: "#6b7280" }} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>{l}</button>
+                            style={{ color: "#6b7280" }} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>{l}</button>
                           : <a key={l} href={h} className="block text-sm transition-colors"
-                              style={{ color: "#6b7280" }} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>{l}</a>
+                            style={{ color: "#6b7280" }} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>{l}</a>
                       ))}
                     </div>
                   </div>

@@ -2,6 +2,8 @@
 import "./globals.css"
 import { Toaster } from "sonner";
 import ClientWrapper from "@/components/ui/ClientWrapper";
+import { SpeedInsights } from "@vercel/speed-insights/next"
+
 
 
 export const metadata = {
@@ -18,6 +20,7 @@ export default function RootLayout({ children }) {
       <body className="antialiased" suppressHydrationWarning >
         <ClientWrapper>
           {children}
+          <SpeedInsights />
           <Toaster position="top-center" />
         </ClientWrapper>
       </body>
