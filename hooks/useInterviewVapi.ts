@@ -637,7 +637,7 @@ OTHER RULES:
           // Whole-call idle-hangup timeout. Must stay comfortably above
           // SILENCE_TRANSITION_SECONDS, or Vapi could end the call while the
           // candidate is still mid-thought on a single question.
-          silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS,
+          silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS  ,
           transcriber: {
             provider: "deepgram",
             model: "nova-2",
@@ -676,7 +676,7 @@ OTHER RULES:
             temperature: 0.3,
             messages: [{ role: "system", content: buildSystemPrompt(languageCode) }],
           },
-        });
+        } as any);
       } catch (error) {
         callStartedRef.current = false;
         console.error("Failed to start Vapi call:", error);

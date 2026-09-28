@@ -428,7 +428,7 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
                                     </div>
                                     <div>
                                         <h3 className="text-sm font-bold text-slate-900">Sample Question</h3>
-                                        <p className="text-[10px] text-slate-500">Here's an example of what to expect</p>
+                                        <p className="text-[10px] text-slate-500">Here&apos;s an example of what to expect</p>
                                     </div>
                                 </div>
 
