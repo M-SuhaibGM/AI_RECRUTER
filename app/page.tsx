@@ -287,9 +287,9 @@ export default function LandingPage(): JSX.Element {
 
         {/* ░░ BG CANVAS ░░ */}
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="orb-a absolute -top-[15%] -left-[8%] w-[55%] h-[55%] rounded-full"
+          <div className="orb-a absolute top-[-15%] left-[-8%] w-[55%] h-[55%] rounded-full"
             style={{ background: "radial-gradient(circle,rgba(37,99,235,.1) 0%,transparent 70%)", filter: "blur(90px)" }} />
-          <div className="orb-b absolute -bottom-[15%] -right-[8%] w-[60%] h-[60%] rounded-full"
+          <div className="orb-b absolute bottom-[-15%] right-[-8%] w-[60%] h-[60%] rounded-full"
             style={{ background: "radial-gradient(circle,rgba(79,70,229,.09) 0%,transparent 70%)", filter: "blur(100px)" }} />
           <div className="orb-c absolute top-[35%] right-[25%] w-[35%] h-[35%] rounded-full"
             style={{ background: "radial-gradient(circle,rgba(14,165,233,.07) 0%,transparent 70%)", filter: "blur(70px)" }} />
@@ -301,7 +301,7 @@ export default function LandingPage(): JSX.Element {
         {/* ░░ NAVBAR ░░ */}
         <header className="sticky top-0 z-50"
           style={{ background: "rgba(248,250,252,.92)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(0,0,0,.07)" }}>
-          <div className="max-w-7xl mx-auto flex h-[62px] items-center justify-between px-4 sm:px-6 md:px-10">
+          <div className="max-w-7xl mx-auto flex h-15.5 items-center justify-between px-4 sm:px-6 md:px-10">
 
             {/* Logo */}
             <div className="flex items-center gap-2.5 cursor-pointer select-none" onClick={() => router.push("/")}>

@@ -26,6 +26,8 @@
     "@stripe/stripe-js": "^8.9.0",
     "@tidbcloud/prisma-adapter": "^6.17.0",
     "@tidbcloud/serverless": "^0.3.0",
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.39.0",
     "@vapi-ai/web": "^2.5.2",
     "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.12.2",
