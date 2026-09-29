@@ -93,7 +93,7 @@ export default function LoginForm() {
 
         <div className="relative z-10 flex flex-col items-center text-center max-w-md">
           {/* ✅ Bot icon in a blue container */}
-          <div className="mb-6 p-5 rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 shadow-lg shadow-blue-200">
+          <div className="mb-6 p-5 rounded-3xl bg-linear-to-br from-blue-600 to-indigo-700 shadow-lg shadow-blue-200">
             <Bot className="w-16 h-16 text-white" strokeWidth={1.5} />
           </div>
 
@@ -109,7 +109,7 @@ export default function LoginForm() {
           alt=""
           width={700}
           height={700}
-          className="z-10 mt-8 opacity-90 w-[350px] h-auto"
+          className="z-10 mt-8 opacity-90 w-87.5 h-auto"
           priority
         />
       </div>
