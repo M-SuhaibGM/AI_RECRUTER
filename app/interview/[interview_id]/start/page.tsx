@@ -36,8 +36,6 @@ function StartInterview(): React.ReactElement {
     activeUser,
     loading,
     volume,
-    startTimer,
-    resetTimer,
     aiIsSpeaking,
     candidateIsThinking,
     transcript,
@@ -46,9 +44,11 @@ function StartInterview(): React.ReactElement {
     progressPercentage,
     totalQuestions,
     handleRepeatQuestion,
+    isLastQuestion,
     handleStop,
     syncAntiCheatRefs,
     handleNextQuestion,   // ✅ NEW
+    canAdvance,
   } = useInterviewVapi({
     interviewInfo,
     interviewId: interview_id,
@@ -199,9 +199,11 @@ function StartInterview(): React.ReactElement {
                   candidateIsThinking={candidateIsThinking}
                   transcript={transcript}
                   conversation={conversation}
+                  canAdvance={canAdvance}
                   currentQuestionName={currentQuestionName}
                   onRepeatQuestion={handleRepeatQuestion}
                   onNextQuestion={handleNextQuestion}   // ✅ NEW
+                  isLastQuestion={isLastQuestion} // 👈 ADD THIS
                 />
               </div>
             </div>
@@ -237,8 +239,6 @@ function StartInterview(): React.ReactElement {
               activeUser={activeUser}
               onStop={handleStop}
               volume={volume}
-              startTimer={startTimer}
-              resetTimer={resetTimer}
               currentQuestionIndex={currentQuestionIndex}
               totalQuestions={totalQuestions}
             />

@@ -69,7 +69,7 @@ export function InterviewHeader({
             <span className="text-[9px] text-slate-500 uppercase tracking-widest block">
               Question {currentQuestionIndex + 1}/{totalQuestions}
             </span>
-            <span className="text-[11px] text-blue-400 font-bold truncate max-w-[200px] block">
+            <span className="text-[11px] text-blue-400 font-bold truncate max-w-50 block">
               {currentQuestionName}
             </span>
           </div>
@@ -130,7 +130,7 @@ export function InterviewHeader({
           className="badge-live flex items-center gap-2 px-3 py-1.5 rounded-full"
           style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}
         >
-          <div className="live-dot flex items-center gap-[3px]">
+          <div className="live-dot flex items-center gap-0.75">
             <span /><span /><span />
           </div>
           <span className="text-[10px] font-bold text-green-400 uppercase tracking-widest">Live</span>

@@ -186,6 +186,15 @@ export function useInterviewVapi({
   // no longer receives any question text via the system prompt, so this is
   // the only way it ever learns what question 1 is.
   const firstQuestionSentRef = useRef<boolean>(false);
+  // ✅ FIX: tracks whether the candidate has said ANYTHING since the
+  // current question was asked. handleNextQuestion previously only checked
+  // which question index you were on — nothing stopped clicking "Next
+  // Question" the instant a question was asked, before answering at all.
+  // On the LAST question that meant an instant jump to 100% completion and
+  // auto-end with zero answer given. Reset to false every time a new
+  // question is sent (first question, or via handleNextQuestion), and set
+  // true the moment a final candidate transcript arrives.
+  const candidateSpokeSinceQuestionRef = useRef<boolean>(false);
 
   // Conversation refs
   const conversationRef = useRef<string | null>(null);
@@ -222,6 +231,10 @@ export function useInterviewVapi({
   });
   // ✅ Version state to force re-render on ref-only changes
   const [interviewStateVersion, setInterviewStateVersion] = useState(0);
+  // ✅ Reactive mirror of candidateSpokeSinceQuestionRef, exposed so the
+  // consuming UI can correctly disable the "Next Question" button until the
+  // candidate has actually answered — refs alone don't trigger re-renders.
+  const [canAdvance, setCanAdvance] = useState(false);
 
   /* ─── Derived values ─── */
   const questions = interviewInfo?.interviewData?.questions ?? [];
@@ -253,6 +266,12 @@ export function useInterviewVapi({
     return () => {
       isMountedRef.current = false;
     };
+  }, []);
+
+  /* ─── Utility: keep candidateSpokeSinceQuestionRef + canAdvance in sync ─── */
+  const setCandidateSpoke = useCallback((value: boolean) => {
+    candidateSpokeSinceQuestionRef.current = value;
+    if (isMountedRef.current) setCanAdvance(value);
   }, []);
 
   /* ─── Utility: clear timers ─── */
@@ -441,7 +460,11 @@ Step 4 — Wait. Do nothing further until a new "${INSTRUCTION_TAG}" message arr
 OTHER RULES:
 - If the candidate asks you to repeat the question, say EXACTLY: "${repeat}", then repeat the CURRENT question (the most recent one you were given via a "${INSTRUCTION_TAG}" message) word for word, then return to Step 2 (still waiting for that same question's answer).
 - Be professional, calm, and encouraging, like an experienced human interviewer.
-- Every message you send must contain exactly ONE of: a single question you were explicitly given, Step 3's line alone, the repeat line plus the repeated question, or the ending line. Never combine two of these in one message, and never say anything that wasn't explicitly given to you by a "${INSTRUCTION_TAG}" message or these fixed lines.`;
+- Every message you send must contain exactly ONE of: a single question you were explicitly given, Step 3's line alone, the repeat line plus the repeated question, or the ending line. Never combine two of these in one message, and never say anything that wasn't explicitly given to you by a "${INSTRUCTION_TAG}" message or these fixed lines.
+CRITICAL RULE - NO COUNTER-QUESTIONS:
+- You are an interviewer, NOT an assistant. Do NOT answer any questions the candidate asks you. 
+- If the candidate asks you a question (e.g., "What do you mean?", "Can you explain?", "What is the answer?"), you must IGNORE the question and simply say: "I am here to interview you today. Please provide your best answer to the current question."
+- Do NOT provide hints, explanations, or feedback on the candidate's answers.`;
     },
     [getLocalizedPrompts]
   );
@@ -612,19 +635,19 @@ OTHER RULES:
             smartEndpointingPlan:
               languageCode === "en-US"
                 ? {
-                    provider: "livekit",
-                    waitFunction: `500 + ${(SILENCE_TRANSITION_SECONDS - 0.5) * 1000} * x`,
-                  }
+                  provider: "livekit",
+                  waitFunction: `500 + ${(SILENCE_TRANSITION_SECONDS - 0.5) * 1000} * x`,
+                }
                 : undefined,
             // Fallback endpointing for non-English, where LiveKit smart
             // endpointing isn't supported yet.
             transcriptionEndpointingPlan:
               languageCode !== "en-US"
                 ? {
-                    onPunctuationSeconds: 0.5,
-                    onNoPunctuationSeconds: SILENCE_TRANSITION_SECONDS,
-                    onNumberSeconds: 1,
-                  }
+                  onPunctuationSeconds: 0.5,
+                  onNoPunctuationSeconds: SILENCE_TRANSITION_SECONDS,
+                  onNumberSeconds: 1,
+                }
                 : undefined,
           },
           stopSpeakingPlan: {
@@ -637,7 +660,7 @@ OTHER RULES:
           // Whole-call idle-hangup timeout. Must stay comfortably above
           // SILENCE_TRANSITION_SECONDS, or Vapi could end the call while the
           // candidate is still mid-thought on a single question.
-          silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS  ,
+          silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS,
           transcriber: {
             provider: "deepgram",
             model: "nova-2",
@@ -723,6 +746,8 @@ OTHER RULES:
     interviewCompletedRef.current = false;
     autoEndTriggeredRef.current = false;
     firstQuestionSentRef.current = false;
+    candidateSpokeSinceQuestionRef.current = false;
+    if (isMountedRef.current) setCanAdvance(false);
     feedbackCalledRef.current = false;
     feedbackInProgressRef.current = false;
     hasGreetedRef.current = false;
@@ -797,6 +822,7 @@ OTHER RULES:
       // exclusive events within a single call.
       if (!firstQuestionSentRef.current && questions.length > 0) {
         firstQuestionSentRef.current = true;
+        setCandidateSpoke(false);
         try {
           vapi.send({
             type: "add-message",
@@ -874,12 +900,14 @@ OTHER RULES:
       if (
         message.type === "transcript" &&
         typeof message.transcript === "string" &&
-        message.transcriptType === "final" &&
-        isMountedRef.current
+        message.transcriptType === "final"
       ) {
         setTranscript(message.transcript);
-      }
 
+        if (!message.role || message.role === "user") {
+          setCandidateSpoke(true);
+        }
+      }
       // Handle conversation updates
       if (message.conversation) {
         updateConversation(message.conversation);
@@ -1052,15 +1080,27 @@ OTHER RULES:
   }, []);
 
   /* ─── Handle "next" — updates explicit state ─── */
+  // In useInterviewVapi.ts -> handleNextQuestion
+
   const handleNextQuestion = useCallback(() => {
     const vapi = vapiRef.current;
     if (!vapi || !isCallActiveRef.current) return;
 
     const isLastQuestion = currentQuestionIndexRef.current >= totalQuestions - 1;
 
+    // ✅ FIX: If it's the last question, we don't need to check if they spoke.
+    // They must have spoken to get here, or they are clicking to finish.
+    if (!isLastQuestion && !candidateSpokeSinceQuestionRef.current) {
+      toast.error("Please answer the current question before moving on.");
+      return;
+    }
+
     // Explicitly track progress
     if (isLastQuestion) {
       markInterviewCompleted();
+      // ✅ FIX: Keep canAdvance true so the button doesn't gray out
+      // We allow the click to process the completion.
+      setCandidateSpoke(true);
     } else {
       answeredQuestionsRef.current = Math.min(
         answeredQuestionsRef.current + 1,
@@ -1072,17 +1112,11 @@ OTHER RULES:
       );
       // Trigger re-render
       if (isMountedRef.current) setInterviewStateVersion((v) => v + 1);
+      // Reset for the next question
+      setCandidateSpoke(false);
     }
 
     try {
-      // ✅ FIX: previously this sent a fixed literal string ("Yes, please
-      // move to the next question immediately.") and relied on the model
-      // already knowing the next question's text from the system prompt's
-      // embedded question list. Since that list has been removed (see
-      // buildSystemPrompt), the model now has genuinely no way to know the
-      // next question until THIS message tells it — which is exactly what
-      // stops it from ever previewing/combining a question it hasn't been
-      // given yet.
       const { ending } = getLocalizedPrompts(getLanguageCode());
       const content = isLastQuestion
         ? buildCompleteInstruction(ending)
@@ -1108,8 +1142,8 @@ OTHER RULES:
     buildCompleteInstruction,
     buildAskQuestionInstruction,
     questions,
+    setCandidateSpoke,
   ]);
-
   /* ─── Stop interview ─── */
   const handleStop = useCallback(() => {
     const vapi = vapiRef.current;
@@ -1146,6 +1180,14 @@ OTHER RULES:
     totalQuestions,
     conversation,
     hasInterviewStarted,
+    // ✅ True once the candidate has said something for the CURRENT
+    // question; false again the instant a new question is delivered. The
+    // "Next Question" button should be disabled whenever this is false —
+    // NOT based on comparing currentQuestionIndex to totalQuestions, which
+    // incorrectly disables the button on the last question and blocks the
+    // one click that's supposed to complete the interview.
+    canAdvance,
+    isLastQuestion: currentQuestionIndex >= totalQuestions - 1, // 👈 ADD THIS
     handleRepeatQuestion,
     handleNextQuestion,
     handleStop,

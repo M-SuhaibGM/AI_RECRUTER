@@ -16,6 +16,7 @@ interface InterviewInterfaceProps {
     userEmail?: string;
     interviewData?: any;
   } | undefined;
+
   currentQuestionIndex: number;
   totalQuestions: number;
   activeUser: boolean;
@@ -24,10 +25,13 @@ interface InterviewInterfaceProps {
   transcript?: string;
   conversation?: string;
   currentQuestionName?: string;
-  onRepeatQuestion?: () => void;
-  onNextQuestion?: () => void;   // ✅ NEW
-}
+  isLastQuestion?: boolean; // 👈 ADD THIS
 
+  canAdvance?: boolean;
+
+  onRepeatQuestion?: () => void;
+  onNextQuestion?: () => void;
+}
 // ═══════════════════════════════════════════════════════════════
 // 🎯 RADIAL BARS (Google Assistant style - circular bars)
 // ═══════════════════════════════════════════════════════════════
@@ -159,12 +163,14 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
   totalQuestions,
   activeUser,
   aiIsSpeaking = false,
+  isLastQuestion = false, // 👈 ADD THIS
   candidateIsThinking = false,
   transcript = "",
   conversation = "",
   currentQuestionName = "",
+  canAdvance = false,
   onRepeatQuestion,
-  onNextQuestion,   // ✅ NEW
+  onNextQuestion,
 }) => {
   const [aiStatus, setAiStatus] = useState<"standby" | "speaking" | "thinking">("standby");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -264,7 +270,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
           <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">
             <span>Current Question</span>
             <span className="text-blue-600">
-              {currentQuestionIndex} / {totalQuestions}
+              {totalQuestions > 0 ? currentQuestionIndex + 1 : 0} / {totalQuestions}
             </span>
           </div>
           <p className="text-sm font-bold text-slate-700 line-clamp-2">
@@ -289,11 +295,11 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
             className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${getStatusColor()}`}
           >
             {isSpeaking && (
-              <div className="flex items-end gap-[2px] h-3">
+              <div className="flex items-end gap-0.5 h-3">
                 {[0, 1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="w-[2px] rounded-full bg-blue-500"
+                    className="w-0.5 rounded-full bg-blue-500"
                     style={{
                       height: "100%",
                       animation: `waveform 0.8s ease-in-out ${i * 0.1}s infinite`,
@@ -323,20 +329,24 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
                 </button>
               )}
 
-              {/* ✅ NEW: Next Question button */}
               {onNextQuestion && (
                 <button
                   onClick={onNextQuestion}
-                  disabled={currentQuestionIndex >= totalQuestions - 1}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-95 bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow-md shadow-blue-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                  // ✅ FIX: If it's the last question, we allow the click even if canAdvance is false
+                  // because the user might be clicking to finalize.
+                  disabled={!canAdvance && !isLastQuestion}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-95 text-white shadow-md ${(canAdvance || isLastQuestion)
+                      ? "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 shadow-blue-200"
+                      : "bg-slate-300 cursor-not-allowed shadow-none"
+                    }`}
                 >
-                  Next Question
+                  {/* ✅ FIX: Use isLastQuestion to determine text */}
+                  {isLastQuestion ? "Finish Interview" : "Next Question"}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
           )}
-
           {/* Mic indicator */}
           <div className="ml-auto flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
             {activeUser ? (
@@ -355,7 +365,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
           RIGHT SIDE — Chat-Style Transcript
           ═══════════════════════════════════════════════════════════ */}
       <div
-        className="w-[340px] lg:w-[380px] shrink-0 flex flex-col rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden"
+        className="w-85 lg:w-95 shrink-0 flex flex-col rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden"
         style={{ maxHeight: "100%" }}
       >
         {/* Chat header */}
@@ -401,8 +411,8 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
                   {/* Avatar */}
                   <div
                     className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${msg.role === "ai"
-                      ? "bg-gradient-to-br from-blue-500 to-blue-700"
-                      : "bg-gradient-to-br from-slate-500 to-slate-700"
+                      ? "bg-linear-to-br from-blue-500 to-blue-700"
+                      : "bg-linear-to-br from-slate-500 to-slate-700"
                       }`}
                   >
                     {msg.role === "ai" ? (
@@ -422,7 +432,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
                     <p className="font-bold text-[9px] uppercase tracking-wider mb-1 opacity-60">
                       {msg.role === "ai" ? "AI Recruiter" : interviewInfo?.userName || "You"}
                     </p>
-                    <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                    <p className="whitespace-pre-wrap wrap-break-word">{msg.text}</p>
                   </div>
                 </div>
               ))}
@@ -434,7 +444,7 @@ const InterviewInterface: React.FC<InterviewInterfaceProps> = ({
         {/* Chat footer — typing indicator */}
         {isSpeaking && activeUser && (
           <div className="shrink-0 px-4 py-2 border-t border-slate-100 flex items-center gap-2 bg-blue-50/30">
-            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-full bg-linear-to-br from-blue-500 to-blue-700 flex items-center justify-center">
               <Bot className="w-2.5 h-2.5 text-white" />
             </div>
             <div className="flex items-center gap-1">

@@ -22,8 +22,7 @@ interface InterviewControlsProps {
   activeUser: boolean;
   onStop: () => void;
   volume: number;
-  startTimer: boolean;
-  resetTimer: boolean;
+
   currentQuestionIndex: number;
   totalQuestions: number;
 }
@@ -52,7 +51,7 @@ function InlineWaveform({ volume = 0, active = false }: InlineWaveformProps): Re
   }, [active, volume]);
 
   return (
-    <div className="flex items-end gap-[2px]" style={{ height: 28 }}>
+    <div className="flex items-end gap-0.5" style={{ height: 28 }}>
       {bars.map((h: number, i: number) => (
         <div
           key={i}
@@ -116,8 +115,6 @@ const InterviewControls: React.FC<InterviewControlsProps> = ({
   activeUser,
   onStop,
   volume,
-  startTimer,
-  resetTimer,
   currentQuestionIndex,
   totalQuestions,
 }) => {
