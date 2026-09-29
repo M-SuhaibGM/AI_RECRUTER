@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt"; // ✅ Edge-compatible
+import bcrypt from "bcryptjs"; // ✅ Edge-compatible
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { AuthOptions, DefaultSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";

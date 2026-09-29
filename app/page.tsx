@@ -1,15 +1,13 @@
 "use client";
-import React, { useState, useEffect, useRef, JSX } from "react";
+import React, { useState, useEffect, useRef, JSX, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2, PlayCircle, Sparkles, Mic,
   BarChart3, Users, X, ArrowRight, Zap,
   Shield, Globe, ChevronRight, Bot,
-  Menu, // ← add
+  Menu,
 } from "lucide-react";
-import { useSession } from "next-auth/react";
-import { Skeleton } from "@/components/ui/skeleton";
-import Image from "next/image"; // Imported Next.js Image component
+import Image from "next/image";
 
 /* ═══════════════════════════════════════════
    GLOBAL STYLES (Injected safely)
@@ -32,12 +30,10 @@ const STYLES = `
 
   html { scroll-behavior: smooth; }
 
-  /* ── Scrollbar ── */
   * { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
   *::-webkit-scrollbar { width: 4px; }
   *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 
-  /* ── Keyframes ── */
   @keyframes rise         { from{opacity:0;transform:translateY(36px)} to{opacity:1;transform:translateY(0)} }
   @keyframes fade         { from{opacity:0} to{opacity:1} }
   @keyframes float-card  { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-12px) rotate(.4deg)} }
@@ -54,7 +50,6 @@ const STYLES = `
   @keyframes card-reveal { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
   @keyframes glow-breath { 0%,100%{opacity:.35;transform:scale(1)} 50%{opacity:.65;transform:scale(1.08)} }
 
-  /* ── Animation classes ── */
   .rise-1  { animation: rise .85s cubic-bezier(.16,1,.3,1) .05s both }
   .rise-2  { animation: rise .85s cubic-bezier(.16,1,.3,1) .18s both }
   .rise-3  { animation: rise .85s cubic-bezier(.16,1,.3,1) .31s both }
@@ -85,7 +80,6 @@ const STYLES = `
     animation: scan-line 3.5s linear infinite;
   }
 
-  /* ── Reveal on scroll ── */
   .reveal       { opacity: 0; transform: translateY(28px); transition: opacity .7s ease, transform .7s cubic-bezier(.16,1,.3,1); }
   .reveal.in    { opacity: 1; transform: none; }
   .reveal-d1    { transition-delay: .1s }
@@ -95,7 +89,6 @@ const STYLES = `
   .reveal-d5    { transition-delay: .5s }
   .reveal-d6    { transition-delay: .6s }
 
-  /* ── Cards ── */
   .card {
     background: #fff;
     border: 1px solid rgba(0,0,0,.07);
@@ -108,7 +101,6 @@ const STYLES = `
     box-shadow: 0 16px 48px rgba(37,99,235,.11), 0 4px 12px rgba(0,0,0,.05);
   }
 
-  /* ── Buttons ── */
   .btn-blue {
     background: linear-gradient(135deg, #1d4ed8, #3b82f6);
     color: #fff;
@@ -132,7 +124,6 @@ const STYLES = `
   }
   .btn-outline:hover { border-color: rgba(37,99,235,.35); box-shadow: 0 4px 16px rgba(37,99,235,.12); }
 
-  /* ── Nav links ── */
   .nlink {
     font-family: 'Instrument Sans', sans-serif;
     font-size: .83rem; font-weight: 500; color: #4b5563;
@@ -149,7 +140,6 @@ const STYLES = `
   .nlink:hover { color: #2563eb; }
   .nlink:hover::after { transform: scaleX(1); }
 
-  /* ── Stat counter ── */
   .stat-big {
     font-family: 'Bricolage Grotesque', sans-serif;
     font-size: 2.8rem; font-weight: 800; line-height: 1;
@@ -158,14 +148,12 @@ const STYLES = `
     animation: count-up .8s cubic-bezier(.34,1.56,.64,1) both;
   }
 
-  /* ── Pricing highlight ── */
   .plan-popular {
     background: linear-gradient(155deg, #eff6ff, #eef2ff);
     border: 2px solid rgba(37,99,235,.28);
     box-shadow: 0 0 0 5px rgba(37,99,235,.05), 0 16px 48px rgba(37,99,235,.14);
   }
 
-  /* ── Hero underline accent ── */
   .hero-line {
     position: relative; display: inline-block;
   }
@@ -262,16 +250,18 @@ export default function LandingPage(): JSX.Element {
   const router = useRouter();
   const [modal, setModal] = useState<boolean>(false);
   const [mobileMenu, setMobileMenu] = useState<boolean>(false);
-  const { status } = useSession();
   const heroRef = useRef<HTMLDivElement | null>(null);
 
   const s1 = useReveal(),
     s2 = useReveal(),
     s3 = useReveal();
 
-  const go = (): void => router.push(status === "authenticated" ? "/dashboard" : "/auth/login");
+  // ✅ No useSession — everything routes through /dashboard,
+  //    middleware redirects to /auth/login if unauthenticated
+  const go = useCallback(() => {
+    router.push("/dashboard");
+  }, [router]);
 
-  // Type definitions for interactive dynamic hover references
   const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement | HTMLAnchorElement>): void => {
     e.currentTarget.style.color = "#fff";
   };
@@ -298,12 +288,10 @@ export default function LandingPage(): JSX.Element {
         </div>
 
         {/* ░░ NAVBAR ░░ */}
-        {/* ░░ NAVBAR ░░ */}
         <header className="sticky top-0 z-50"
           style={{ background: "rgba(248,250,252,.92)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(0,0,0,.07)" }}>
           <div className="max-w-7xl mx-auto flex h-15.5 items-center justify-between px-4 sm:px-6 md:px-10">
 
-            {/* Logo */}
             <div className="flex items-center gap-2.5 cursor-pointer select-none" onClick={() => router.push("/")}>
               <div className="w-8 h-8 rounded-xl flex items-center justify-center"
                 style={{ background: "linear-gradient(135deg,#1d4ed8,#3b82f6)", boxShadow: "0 4px 14px rgba(37,99,235,.35)" }}>
@@ -314,44 +302,26 @@ export default function LandingPage(): JSX.Element {
               </span>
             </div>
 
-            {/* Desktop nav links */}
             <nav className="hidden md:flex items-center gap-9">
               {[["#features", "Features"], ["#pricing", "Pricing"], ["#whatsnew", "What's New"]].map(([h, l]) => (
                 <a key={h} href={h} className="nlink">{l}</a>
               ))}
             </nav>
 
-            {/* Desktop auth buttons */}
+            {/* ✅ Simplified — no status check, no skeletons */}
             <div className="hidden md:flex items-center gap-2.5">
-              {status === "loading" ? (
-                <><Skeleton className="h-9 w-18 rounded-xl bg-slate-200" /><Skeleton className="h-9 w-28 rounded-xl bg-slate-200" /></>
-              ) : (
-                <>
-                  <button className="btn-outline px-4 py-2 rounded-xl text-sm" onClick={go}>
-                    {status === "authenticated" ? "Dashboard" : "Sign in"}
-                  </button>
-                  {status !== "authenticated" && (
-                    <button className="btn-blue px-4 py-2 rounded-xl text-sm flex items-center gap-1.5" onClick={go}>
-                      Get Started <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </>
-              )}
+              <button className="btn-outline px-4 py-2 rounded-xl text-sm" onClick={go}>
+                Sign in
+              </button>
+              <button className="btn-blue px-4 py-2 rounded-xl text-sm flex items-center gap-1.5" onClick={go}>
+                Get Started <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            {/* Mobile: compact CTA + hamburger */}
             <div className="flex md:hidden items-center gap-2">
-              {status === "loading" ? (
-                <Skeleton className="h-9 w-20 rounded-xl bg-slate-200" />
-              ) : status !== "authenticated" ? (
-                <button className="btn-blue px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5" onClick={go}>
-                  Get Started <ArrowRight className="w-3 h-3" />
-                </button>
-              ) : (
-                <button className="btn-outline px-3.5 py-2 rounded-xl text-xs" onClick={go}>
-                  Dashboard
-                </button>
-              )}
+              <button className="btn-blue px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5" onClick={go}>
+                Get Started <ArrowRight className="w-3 h-3" />
+              </button>
               <button
                 aria-label="Toggle menu"
                 aria-expanded={mobileMenu}
@@ -364,7 +334,7 @@ export default function LandingPage(): JSX.Element {
             </div>
           </div>
 
-          {/* Mobile dropdown panel */}
+          {/* Mobile menu */}
           {mobileMenu && (
             <div className="md:hidden border-t" style={{ borderColor: "rgba(0,0,0,.07)", background: "#fff" }}>
               <nav className="flex flex-col px-5 py-3">
@@ -385,16 +355,14 @@ export default function LandingPage(): JSX.Element {
                     className="btn-outline w-full py-3 rounded-xl text-sm"
                     onClick={() => { setMobileMenu(false); go(); }}
                   >
-                    {status === "authenticated" ? "Go to Dashboard" : "Sign in"}
+                    Sign in
                   </button>
-                  {status !== "authenticated" && (
-                    <button
-                      className="btn-blue w-full py-3 rounded-xl text-sm flex items-center justify-center gap-2"
-                      onClick={() => { setMobileMenu(false); go(); }}
-                    >
-                      Get Started <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <button
+                    className="btn-blue w-full py-3 rounded-xl text-sm flex items-center justify-center gap-2"
+                    onClick={() => { setMobileMenu(false); go(); }}
+                  >
+                    Get Started <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </nav>
             </div>
@@ -405,14 +373,12 @@ export default function LandingPage(): JSX.Element {
         <section ref={heroRef} className="relative z-10 pt-20 pb-28 md:pt-28 md:pb-36 text-center">
           <div className="max-w-7xl mx-auto px-6 md:px-10">
 
-            {/* pill badge */}
             <div className="badge-pop inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-8"
               style={{ background: "#eff6ff", border: "1px solid rgba(37,99,235,.25)", boxShadow: "0 2px 12px rgba(37,99,235,.12)" }}>
               <Sparkles className="w-3.5 h-3.5 text-blue-600 spin-slow" />
               <span className="text-[11px] font-bold uppercase tracking-[.22em] text-blue-700">Next-Gen AI Hiring Platform</span>
             </div>
 
-            {/* headline */}
             <h1 className="rise-1 mb-6"
               style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: "clamp(2.6rem,6vw,5.5rem)", lineHeight: 1.04, letterSpacing: "-.03em", color: "#0c0f1a" }}>
               Hire Smarter.<br />
@@ -425,7 +391,6 @@ export default function LandingPage(): JSX.Element {
               and conversations that feel genuinely human.
             </p>
 
-            {/* CTA row */}
             <div className="rise-3 flex flex-col sm:flex-row items-center justify-center gap-3 mb-20">
               <button className="btn-blue px-8 py-3.5 rounded-2xl text-[.93rem] flex items-center gap-2" onClick={go}>
                 Start Free Trial <ArrowRight className="w-4 h-4" />
@@ -437,15 +402,12 @@ export default function LandingPage(): JSX.Element {
               </a>
             </div>
 
-            {/* Dashboard mockup */}
             <div className="rise-4 float-card relative mx-auto max-w-5xl">
-              {/* halo glow */}
               <div className="glow-breath absolute -inset-6 rounded-[3rem]"
                 style={{ background: "radial-gradient(ellipse,rgba(37,99,235,.18) 0%,rgba(79,70,229,.1) 50%,transparent 75%)", filter: "blur(32px)" }} />
               <div className="relative rounded-3xl overflow-hidden"
                 style={{ border: "1.5px solid rgba(37,99,235,.15)", background: "#fff", boxShadow: "0 32px 80px rgba(0,0,0,.14),0 2px 8px rgba(0,0,0,.06)" }}>
                 <div className="scan-el" />
-                {/* fake browser chrome */}
                 <div className="flex items-center gap-1.5 px-5 py-3.5 border-b"
                   style={{ borderColor: "rgba(0,0,0,.06)", background: "#f1f5f9" }}>
                   {["#ef4444", "#f59e0b", "#22c55e"].map((c, i) => (
@@ -459,14 +421,14 @@ export default function LandingPage(): JSX.Element {
                     </div>
                   </div>
                 </div>
-                {/* Fixed line 396: Replaced <img> with optimized Next.js <Image /> */}
                 <Image
                   src="/dashboard.jpeg"
-                  alt="Dashboard"
+                  alt="Dashboard preview"
                   width={1200}
                   height={675}
                   className="w-full h-auto block"
                   priority
+                  sizes="(max-width: 1024px) 100vw, 1024px"
                 />
               </div>
             </div>
@@ -534,7 +496,6 @@ export default function LandingPage(): JSX.Element {
             <div className="relative rounded-3xl overflow-hidden p-12 md:p-20 text-center"
               style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 40%,#4f46e5 100%)", boxShadow: "0 24px 64px rgba(37,99,235,.35)" }}>
               <div className="scan-el" />
-              {/* subtle mesh */}
               <div className="absolute inset-0 opacity-[.06]"
                 style={{ backgroundImage: "radial-gradient(circle,rgba(255,255,255,.7) 1px,transparent 1px)", backgroundSize: "32px 32px" }} />
               <p className="relative text-[10px] font-bold uppercase tracking-[.32em] text-blue-300 mb-5">Limited Time Offer</p>
@@ -669,7 +630,6 @@ export default function LandingPage(): JSX.Element {
                 style={{ color: "#9ca3af" }}>
                 <X className="w-4 h-4" />
               </button>
-              {/* Fixed line 598: Escaped apostrophe inside "Let's Talk" */}
               <h2 className="mb-1.5" style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: "1.4rem", color: "#0c0f1a" }}>Let&apos;s Talk</h2>
               <p className="text-sm mb-7" style={{ color: "#6b7280" }}>
                 Reach out on X (Twitter) for fast responses or enterprise deals.

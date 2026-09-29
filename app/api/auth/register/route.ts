@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { prisma as db } from "@/lib/db";
 
 interface RegisterRequest {

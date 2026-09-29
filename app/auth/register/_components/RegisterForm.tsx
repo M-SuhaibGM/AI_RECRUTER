@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Eye, EyeOff, Loader2, Check, X, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Loader2, Check, X, AlertCircle, Bot } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import Image from "next/image";
@@ -137,26 +137,24 @@ export default function RegisterForm() {
         <div className="absolute w-96 h-96 bg-blue-50/50 rounded-full blur-3xl bottom-10 left-10" />
 
         <div className="relative z-10 flex flex-col items-center text-center max-w-md">
-          <Image
-            src="/logo.png"
-            alt="AI Recruiter Logo"
-            width={140}
-            height={140}
-            className="mb-4 opacity-90"
-            priority
-          />
+          {/* ✅ Bot icon in a blue gradient container (replaces /logo.png) */}
+          <div className="mb-6 p-5 rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 shadow-lg shadow-blue-200">
+            <Bot className="w-16 h-16 text-white" strokeWidth={1.5} />
+          </div>
+
           <h1 className="text-4xl font-bold mb-4">AI Recruiter</h1>
           <p className="text-lg opacity-90 text-gray-600">
             Join the future of recruitment today.
           </p>
         </div>
 
+        {/* ✅ Illustration — correct aspect ratio to silence warning */}
         <Image
           src="/dumy.webp"
           alt=""
-          width={350}
-          height={350}
-          className="z-10 mt-8 opacity-90"
+          width={700}
+          height={700}
+          className="z-10 mt-8 opacity-90 w-[350px] h-auto"
           priority
         />
       </div>
@@ -164,9 +162,10 @@ export default function RegisterForm() {
       {/* RIGHT: Register Card */}
       <div className="flex-1 flex items-center bg-blue-600 justify-center px-6 h-full overflow-y-auto">
         <div className="bg-white shadow-2xl rounded-3xl w-full max-w-md p-8 my-4">
+          {/* ✅ Bot icon in a blue square (replaces /logo.png in card) */}
           <div className="flex justify-center mb-4">
             <div className="bg-blue-50 p-3 rounded-2xl">
-              <Image src="/logo.png" alt="" height={50} width={50} priority />
+              <Bot className="w-8 h-8 text-blue-600" strokeWidth={2} />
             </div>
           </div>
 
