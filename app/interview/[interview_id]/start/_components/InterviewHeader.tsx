@@ -12,7 +12,9 @@ interface InterviewHeaderProps {
   totalDuration: number;
   elapsedSecs: number;
   activeUser: boolean;
+  isInterviewCompleted?: boolean; // 👈 ADD
   fmtTime: (s: number) => string;
+  hasQuestionBeenAsked?: boolean;
 }
 
 export function InterviewHeader({
@@ -24,8 +26,20 @@ export function InterviewHeader({
   totalDuration,
   elapsedSecs,
   activeUser,
+  isInterviewCompleted = false, // 👈 ADD
+  hasQuestionBeenAsked = false,
   fmtTime,
+
 }: InterviewHeaderProps): React.ReactElement {
+
+
+  const displayQuestionNumber = isInterviewCompleted
+    ? totalQuestions
+    : hasQuestionBeenAsked
+      ? Math.min(currentQuestionIndex + 1, totalQuestions)
+      : 0;
+
+
   return (
     <header
       className="header-anim relative z-20 h-16 shrink-0 flex items-center justify-between px-6 md:px-10"
@@ -64,36 +78,40 @@ export function InterviewHeader({
 
       {/* Question Progress */}
       {isPreCheckComplete && (
+        // ... header ...
         <div className="hidden md:flex items-center gap-3">
           <div className="text-right">
             <span className="text-[9px] text-slate-500 uppercase tracking-widest block">
-              Question {currentQuestionIndex + 1}/{totalQuestions}
+              Question {displayQuestionNumber}/{totalQuestions}
             </span>
             <span className="text-[11px] text-blue-400 font-bold truncate max-w-50 block">
-              {currentQuestionName}
+              {isInterviewCompleted ? "Interview Complete" : currentQuestionName}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            {Array.from({ length: totalQuestions }).map((_, i: number) => (
-              <div
-                key={i}
-                className="rounded-full transition-all duration-500"
-                style={{
-                  // ✅ Bolder, bigger dots with glow
-                  height: i < currentQuestionIndex + 1 ? 8 : 6,
-                  width: i < currentQuestionIndex + 1 ? 28 : 22,
-                  background: i < currentQuestionIndex + 1
-                    ? "linear-gradient(90deg,#3b82f6,#60a5fa)"
-                    : "rgba(255,255,255,.12)",
-                  boxShadow: i < currentQuestionIndex + 1
-                    ? "0 0 10px rgba(96,165,250,.7), 0 0 20px rgba(59,130,246,.3)"
-                    : "none",
-                  border: i < currentQuestionIndex + 1
-                    ? "1px solid rgba(96,165,250,.4)"
-                    : "1px solid rgba(255,255,255,.06)",
-                }}
-              />
-            ))}
+            {Array.from({ length: totalQuestions }).map((_, i: number) => {
+              // 👇 A dot is "filled" if we're completed, OR if we've reached/passed it
+              const isFilled = isInterviewCompleted || (hasQuestionBeenAsked && i < currentQuestionIndex + 1);
+              return (
+                <div
+                  key={i}
+                  className="rounded-full transition-all duration-500"
+                  style={{
+                    height: isFilled ? 8 : 6,
+                    width: isFilled ? 28 : 22,
+                    background: isFilled
+                      ? "linear-gradient(90deg,#3b82f6,#60a5fa)"
+                      : "rgba(255,255,255,.12)",
+                    boxShadow: isFilled
+                      ? "0 0 10px rgba(96,165,250,.7), 0 0 20px rgba(59,130,246,.3)"
+                      : "none",
+                    border: isFilled
+                      ? "1px solid rgba(96,165,250,.4)"
+                      : "1px solid rgba(255,255,255,.06)",
+                  }}
+                />
+              );
+            })}
           </div>
         </div>
       )}

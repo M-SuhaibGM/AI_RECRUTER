@@ -284,7 +284,7 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
                         <h2 className="text-lg font-bold text-slate-900 mb-1" style={{ fontFamily: "'Syne',sans-serif" }}>
                             {micStatus === "ready" ? "Microphone Ready" : "Microphone Test"}
                         </h2>
-                        <p className="text-[11px] text-slate-500 text-center mb-4 max-w-[280px]">
+                        <p className="text-[11px] text-slate-500 text-center mb-4 max-w-70">
                             {micStatus === "idle" && "Test your microphone before starting."}
                             {micStatus === "requesting" && "Allow microphone access in your browser."}
                             {micStatus === "active" && (micPeakDetected ? "✓ We can hear you clearly!" : "Say something to test...")}
@@ -294,7 +294,7 @@ export function PreInterviewCheck({ interviewData, onAllReady }: PreInterviewChe
 
                         {/* Waveform */}
                         <div
-                            className="w-full max-w-md h-20 flex items-end justify-center gap-[3px] rounded-2xl p-3 mb-3"
+                            className="w-full max-w-md h-20 flex items-end justify-center gap-0.75 rounded-2xl p-3 mb-3"
                             style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
                         >
                             {micBars.map((h, i) => (

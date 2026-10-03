@@ -22,9 +22,11 @@ interface InterviewControlsProps {
   activeUser: boolean;
   onStop: () => void;
   volume: number;
-
+  isInterviewCompleted?: boolean; // 👈 ADD
   currentQuestionIndex: number;
   totalQuestions: number;
+  progressPercentage: number;
+  hasQuestionBeenAsked: boolean;
 }
 
 // ─── Constants ───
@@ -117,10 +119,19 @@ const InterviewControls: React.FC<InterviewControlsProps> = ({
   volume,
   currentQuestionIndex,
   totalQuestions,
+  hasQuestionBeenAsked = false,
+  isInterviewCompleted = false, // 👈 AD
+  progressPercentage,
 }) => {
-  const progress: number = totalQuestions > 0
-    ? Math.round((currentQuestionIndex / totalQuestions) * 100)
-    : 0;
+
+
+  // 👇 1-based display number; when completed, show the final question
+  const progress = isInterviewCompleted ? 100 : progressPercentage;
+  const displayQuestionNumber = isInterviewCompleted
+    ? totalQuestions
+    : hasQuestionBeenAsked
+      ? Math.min(currentQuestionIndex + 1, totalQuestions)
+      : 0;
 
   return (
     <div
@@ -129,6 +140,7 @@ const InterviewControls: React.FC<InterviewControlsProps> = ({
     >
       {/* ══ CENTRE — STATUS BAR ══ */}
       <div className="flex-1 flex items-center gap-4 md:gap-6 px-5 py-2.5 rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">        {/* Progress ring */}
+        {/* Progress ring */}
         <div className="relative flex items-center justify-center shrink-0">
           <ProgressRing progress={progress} />
           <div className="absolute inset-0 flex items-center justify-center">
@@ -143,7 +155,6 @@ const InterviewControls: React.FC<InterviewControlsProps> = ({
             </span>
           </div>
         </div>
-
         {/* Question count */}
         <div className="hidden sm:flex flex-col gap-0.5">
           <span className="text-[9px] uppercase tracking-widest text-slate-400 font-bold">
@@ -154,12 +165,11 @@ const InterviewControls: React.FC<InterviewControlsProps> = ({
               className="text-xl font-black text-slate-800 leading-none"
               style={{ fontFamily: "'Syne',sans-serif" }}
             >
-              {currentQuestionIndex}
+              {displayQuestionNumber}   {/* 👈 CHANGED */}
             </span>
             <span className="text-xs text-slate-400">/ {totalQuestions}</span>
           </div>
         </div>
-
         {/* Divider */}
         <div className="hidden md:block w-px self-stretch bg-slate-200" />
 

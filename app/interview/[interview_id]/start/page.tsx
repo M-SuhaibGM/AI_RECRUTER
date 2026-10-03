@@ -2,7 +2,7 @@
 "use client";
 import React, { useContext, useEffect, useRef, useState, useMemo } from "react";
 import { InterviewDataContext } from "@/context/InterviewDataContext";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { STYLES } from "@/services/Constants";
 import { useAntiCheat } from "@/hooks/useAntiCheat";
@@ -22,7 +22,7 @@ interface Question {
 function StartInterview(): React.ReactElement {
   const { interviewInfo } = useContext(InterviewDataContext);
   const { interview_id } = useParams<{ interview_id: string }>();
-  const router = useRouter();
+  // const router = useRouter();
 
   /* ─── Local State ─── */
   const [isConfigLoaded, setIsConfigLoaded] = useState<boolean>(false);
@@ -48,7 +48,9 @@ function StartInterview(): React.ReactElement {
     handleStop,
     syncAntiCheatRefs,
     handleNextQuestion,   // ✅ NEW
+    isInterviewCompleted,   // 👈 ADD THIS
     canAdvance,
+    hasQuestionBeenAsked,
   } = useInterviewVapi({
     interviewInfo,
     interviewId: interview_id,
@@ -160,6 +162,8 @@ function StartInterview(): React.ReactElement {
           elapsedSecs={elapsedSecs}
           activeUser={activeUser}
           fmtTime={fmtTime}
+          isInterviewCompleted={isInterviewCompleted}   // 👈 ADD THIS
+          hasQuestionBeenAsked={hasQuestionBeenAsked}
         />
 
         <main className="main-anim flex-1 relative z-10 flex flex-col items-center justify-center px-4 md:px-16 overflow-hidden">
@@ -241,6 +245,9 @@ function StartInterview(): React.ReactElement {
               volume={volume}
               currentQuestionIndex={currentQuestionIndex}
               totalQuestions={totalQuestions}
+              isInterviewCompleted={isInterviewCompleted}   // 👈 ADD THIS
+              hasQuestionBeenAsked={hasQuestionBeenAsked}
+              progressPercentage={progressPercentage}
             />
           </footer>
         )}

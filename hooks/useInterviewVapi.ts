@@ -67,17 +67,6 @@ const VALID_VOICES: string[] = [
 
 const CANDIDATE_SILENCE_MS = 5000;
 
-// ✅ FIX: Vapi/Daily error payloads are NOT shape-stable. Some errors put
-// the useful signal at `error.error.type` / `error.error.msg` (e.g. a
-// "no-room" room-deletion error); others bury it a level deeper, e.g.
-// `error.error.errorMsg` alongside an unrelated top-level `type: "daily-error"`
-// (e.g. a normal "ejection" end-of-call event). Reading two fixed paths
-// silently misclassifies whichever shape doesn't match — a real ejection
-// was observed reaching the "real error" branch and firing a spurious
-// "Connection lost" toast instead of being treated as a normal call end.
-// Scanning every string value in the object (bounded depth, cycle-safe)
-// and checking all of them against the keyword list is robust to whatever
-// shape a given error variant happens to use.
 function collectErrorStrings(
   value: unknown,
   depth = 0,
@@ -106,43 +95,10 @@ const NORMAL_END_KEYWORDS = [
   "meeting has ended",
 ];
 
-// ─── Turn-taking / patience configuration ───
-// These feed BOTH the system prompt wording (what the model is told to do)
-// AND the actual Vapi call config (startSpeakingPlan / stopSpeakingPlan /
-// transcriber.endpointing, which control the platform's own turn-taking —
-// the prompt text alone cannot stop Vapi from cutting the candidate off,
-// since endpointing happens before the transcript ever reaches the model).
-// Keeping them as one shared source of truth avoids the prompt claiming a
-// patience window the platform isn't actually configured to honor.
-//
-// ⚠️ A genuine 30-40s silence tolerance is NOT achievable here. Vapi's API
-// enforces hard server-side caps on this whole layer, confirmed by:
-//   - transcriber.endpointing rejected above 500ms with a live 400:
-//     "assistant.transcriber.endpointing must not be greater than 500"
-//   - startSpeakingPlan.waitSeconds rejected above 5s per Vapi's own
-//     support forum (a user's waitSeconds: 180 request was rejected;
-//     told the ceiling is 5s: https://support.vapi.ai/t/28935279)
-// smartEndpointingPlan.waitFunction's own output cap isn't documented, so
-// it may reject a large computed wait too — increase SILENCE_TRANSITION_SECONDS
-// gradually and watch for further "start-method-error" 400s rather than
-// jumping straight back to 30. 5s is a safe, already-longer-than-default
-// starting point; the prompt wording below uses this same constant so it
-// never overstates what the platform is actually configured to wait for.
-const SILENCE_TRANSITION_SECONDS = 5; // how long the candidate can be silent before the AI assumes they're done and offers to move on — capped by real Vapi limits, see note above
-const RESPONSE_WAIT_SECONDS = 2.5; // minimum pause before the AI starts speaking at all (startSpeakingPlan.waitSeconds) — must stay below Vapi's confirmed 5s ceiling
-const CALL_IDLE_TIMEOUT_SECONDS = 60; // whole-call "hang up if totally silent" timeout — must stay comfortably above SILENCE_TRANSITION_SECONDS, or Vapi's own idle-hangup can end the call while the candidate is still mid-thought
+const SILENCE_TRANSITION_SECONDS = 5;
+const RESPONSE_WAIT_SECONDS = 2.5;
+const CALL_IDLE_TIMEOUT_SECONDS = 60;
 
-// ✅ FIX (structural, not just prompt wording): every previous fix here was
-// "ask the model nicely not to combine the click-line with the next
-// question" — and it kept doing it anyway, repeatedly, because the full
-// question list was embedded in the system prompt from the start. The
-// model already had the next question's text sitting in its own context
-// the whole time, so nothing structurally stopped it from previewing it.
-// The actual fix is to never give the model more than the CURRENT question
-// at any point. Future questions are now only ever delivered via this
-// distinct, unmistakable instruction tag, sent exactly once, exactly when
-// the button is clicked — the model literally cannot say a question it was
-// never given.
 const INSTRUCTION_TAG = "[SYSTEM INSTRUCTION - NOT SPOKEN BY CANDIDATE]:";
 
 // ─── Custom Hook ───
@@ -163,37 +119,14 @@ export function useInterviewVapi({
   const feedbackCalledRef = useRef<boolean>(false);
   const feedbackInProgressRef = useRef<boolean>(false);
   const hasGreetedRef = useRef<boolean>(false);
-
-  // ✅ FIX (critical): gates the setup effect itself. This must NOT be React
-  // state, because the effect that creates the Vapi instance must not be
-  // torn down and re-run as a side effect of the call successfully starting.
-  // (Previously `hasInterviewStarted` state was both set inside this effect
-  // AND listed in its dependency array, which caused React to run the
-  // effect's cleanup — including vapi.stop() — immediately after call-start
-  // fired, silently killing the interview right after it connected.)
   const setupStartedRef = useRef<boolean>(false);
 
-  // Explicit interview state — no longer derived from transcript
+  // Explicit interview state
   const currentQuestionIndexRef = useRef<number>(0);
   const answeredQuestionsRef = useRef<number>(0);
   const interviewCompletedRef = useRef<boolean>(false);
-  // ✅ Guards the auto-end-after-final-message logic below so it only ever
-  // fires once (the model may, in principle, produce more than one
-  // "speech-end" after completion in edge cases — this prevents a double
-  // vapi.stop() call).
   const autoEndTriggeredRef = useRef<boolean>(false);
-  // ✅ Guards sending the first question exactly once per call — the model
-  // no longer receives any question text via the system prompt, so this is
-  // the only way it ever learns what question 1 is.
   const firstQuestionSentRef = useRef<boolean>(false);
-  // ✅ FIX: tracks whether the candidate has said ANYTHING since the
-  // current question was asked. handleNextQuestion previously only checked
-  // which question index you were on — nothing stopped clicking "Next
-  // Question" the instant a question was asked, before answering at all.
-  // On the LAST question that meant an instant jump to 100% completion and
-  // auto-end with zero answer given. Reset to false every time a new
-  // question is sent (first question, or via handleNextQuestion), and set
-  // true the moment a final candidate transcript arrives.
   const candidateSpokeSinceQuestionRef = useRef<boolean>(false);
 
   // Conversation refs
@@ -208,14 +141,12 @@ export function useInterviewVapi({
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Abort controllers for cleanup
+  // Abort controllers
   const feedbackAbortRef = useRef<AbortController | null>(null);
 
   /* ─── STATE ─── */
   const [activeUser, setActiveUser] = useState<boolean>(false);
   const [conversation, setConversation] = useState<string | undefined>();
-  // ✅ Now purely a UI flag (e.g. "connecting..." vs "live"). It no longer
-  // gates or re-triggers the setup effect — see setupStartedRef above.
   const [hasInterviewStarted, setHasInterviewStarted] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [startTimer, setStartTimer] = useState<boolean>(false);
@@ -223,17 +154,17 @@ export function useInterviewVapi({
   const [volume, setVolume] = useState<number>(0);
   const [transcript, setTranscript] = useState<string>("");
   const [aiIsSpeaking, setAiIsSpeaking] = useState<boolean>(false);
+  const [isInterviewCompleted, setIsInterviewCompleted] = useState<boolean>(false);
   const [candidateIsThinking, setCandidateIsThinking] = useState<boolean>(false);
+  // ✅ True as soon as the first question instruction has been sent to the AI.
+  // The UI uses this to avoid showing "Question 1/6" before the AI has asked Q1.
+  const [hasQuestionBeenAsked, setHasQuestionBeenAsked] = useState<boolean>(false);
   const [config, setConfig] = useState<UserConfig>({
     language: "en-US",
     voiceId: "Elliot",
     voiceProvider: "vapi",
   });
-  // ✅ Version state to force re-render on ref-only changes
   const [interviewStateVersion, setInterviewStateVersion] = useState(0);
-  // ✅ Reactive mirror of candidateSpokeSinceQuestionRef, exposed so the
-  // consuming UI can correctly disable the "Next Question" button until the
-  // candidate has actually answered — refs alone don't trigger re-renders.
   const [canAdvance, setCanAdvance] = useState(false);
 
   /* ─── Derived values ─── */
@@ -247,9 +178,15 @@ export function useInterviewVapi({
 
   const progressPercentage = useMemo(() => {
     if (totalQuestions === 0) return 0;
+    if (interviewCompletedRef.current) return 100;
     const answered = Math.min(answeredQuestionsRef.current, totalQuestions);
     return Math.min(Math.round((answered / totalQuestions) * 100), 100);
   }, [totalQuestions, interviewStateVersion]);
+
+  const isLastQuestion = useMemo(
+    () => totalQuestions > 0 && currentQuestionIndex >= totalQuestions - 1,
+    [currentQuestionIndex, totalQuestions]
+  );
 
   /* ─── Sync refs ─── */
   useEffect(() => {
@@ -260,7 +197,6 @@ export function useInterviewVapi({
     conversationRef.current = conversation || null;
   }, [conversation]);
 
-  /* ─── Mounted state ─── */
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -286,17 +222,7 @@ export function useInterviewVapi({
     }
   }, []);
 
-  /* ─── Utility: strip system prompt & internal instruction messages ───
-     Vapi's conversation array always includes model.messages[0] (our full
-     system prompt, role "system") and, going forward, every
-     "[SYSTEM INSTRUCTION...]" message we inject ourselves (role "user",
-     used purely to hand the model the next question — never something the
-     candidate actually said). A real screenshot showed both leaking into
-     the visible "Live Transcript" UI, displayed as if the AI had spoken
-     the system prompt aloud and as if the candidate had typed our internal
-     automation text. Filtering here means every consumer of `conversation`
-     (transcript display, feedback generation, etc.) automatically gets a
-     clean view with no extra work on their end. */
+  /* ─── Utility: strip system prompt & internal instruction messages ─── */
   const filterTranscriptEntries = useCallback((arr: unknown[]): unknown[] => {
     return arr.filter((entry) => {
       if (!entry || typeof entry !== "object") return true;
@@ -375,28 +301,20 @@ export function useInterviewVapi({
     };
   }, []);
 
-  /* ─── Build system prompt ─── */
-  // ✅ FIX (structural, not just prompt wording): every previous fix here
-  // was "ask the model nicely not to combine the click-line with the next
-  // question" — and it kept doing it anyway, repeatedly, because the full
-  // question list was embedded in the system prompt from the start. The
-  // model already had the next question's text sitting in its own context
-  // the whole time, so nothing structurally stopped it from previewing it.
-  // The actual fix is to never give the model more than the CURRENT
-  // question at any point. Future questions are now only ever delivered
-  // via a distinct, unmistakable instruction message (INSTRUCTION_TAG,
-  // declared at module scope above), sent exactly once, exactly when the
-  // button is clicked — the model literally cannot say a question it was
-  // never given.
+  /* ─── Build instruction messages ─── */
   const buildAskQuestionInstruction = useCallback(
-    (questionText: string) =>
-      `${INSTRUCTION_TAG} Ask the candidate EXACTLY this question, word for word, as your ENTIRE next message, with nothing else added: "${questionText}"`,
+    (questionText: string, isFinal: boolean = false) =>
+      `${INSTRUCTION_TAG} Ask the candidate EXACTLY this question, word for word, as your ENTIRE next message, with nothing else added${
+        isFinal
+          ? " — THIS IS THE FINAL QUESTION of the interview. When the candidate finishes answering, use the FINAL-question closing line instead of the standard one."
+          : ""
+      }: "${questionText}"`,
     []
   );
 
   const buildCompleteInstruction = useCallback(
     (endingLine: string) =>
-      `${INSTRUCTION_TAG} The candidate clicked "Next Question" after the final question. Say EXACTLY this as your ENTIRE next message, then stop talking entirely: "${endingLine}"`,
+      `${INSTRUCTION_TAG} The candidate has finished the final question and clicked the "Finish Interview" button. Say EXACTLY this as your ENTIRE next message, then stop talking entirely: "${endingLine}"`,
     []
   );
 
@@ -407,9 +325,20 @@ export function useInterviewVapi({
       "ur-PK": "Urdu (اردو). Always respond in Urdu script.",
     };
     const pleaseClickNextPrompts: Record<string, string> = {
-      "en-US": "Thank you for your answer. Please click the \"Next Question\" button whenever you're ready to continue — I'll wait right here.",
-      "hi-IN": "आपके उत्तर के लिए धन्यवाद। जब भी आप तैयार हों, कृपया \"अगला प्रश्न\" बटन दबाएं — मैं यहीं प्रतीक्षा करूंगा।",
-      "ur-PK": "آپ کے جواب کا شکریہ۔ جب بھی آپ تیار ہوں، براہ کرم \"اگلا سوال\" بٹن دبائیں — میں یہیں انتظار کروں گا۔",
+      "en-US":
+        "Thank you for your answer. Please click the \"Next Question\" button whenever you're ready to continue — I'll wait right here.",
+      "hi-IN":
+        "आपके उत्तर के लिए धन्यवाद। जब भी आप तैयार हों, कृपया \"अगला प्रश्न\" बटन दबाएं — मैं यहीं प्रतीक्षा करूंगा।",
+      "ur-PK":
+        "آپ کے جواب کا شکریہ۔ جب بھی آپ تیار ہوں، براہ کرم \"اگلا سوال\" بٹن دبائیں — میں یہیں انتظار کروں گا۔",
+    };
+    const pleaseClickFinishPrompts: Record<string, string> = {
+      "en-US":
+        "Thank you for your answer. That was the final question — please click the \"Finish Interview\" button whenever you're ready to submit your responses.",
+      "hi-IN":
+        "आपके उत्तर के लिए धन्यवाद। यह अंतिम प्रश्न था — जब भी आप तैयार हों, कृपया \"साक्षात्कार समाप्त करें\" बटन दबाएं।",
+      "ur-PK":
+        "آپ کے جواب کا شکریہ۔ یہ آخری سوال تھا — جب بھی آپ تیار ہوں، براہ کرم \"انٹرویو مکمل کریں\" بٹن دبائیں۔",
     };
     const repeatPrompts: Record<string, string> = {
       "en-US": "Of course, let me repeat the question.",
@@ -417,13 +346,17 @@ export function useInterviewVapi({
       "ur-PK": "بالکل، میں سوال دوبارہ دہراتا ہوں۔",
     };
     const endingPrompts: Record<string, string> = {
-      "en-US": "Thank you for completing the interview! Your responses have been recorded. Have a great day!",
-      "hi-IN": "साक्षात्कार पूरा करने के लिए धन्यवाद! आपके उत्तर रिकॉर्ड कर लिए गए हैं। आपका दिन शुभ हो!",
-      "ur-PK": "انٹرویو مکمل کرنے کا شکریہ! آپ کے جوابات ریکارڈ کر لیے گئے ہیں۔ آپ کا دن اچھا گزرے!",
+      "en-US":
+        "Thank you for completing the interview! Your responses have been recorded. Have a great day!",
+      "hi-IN":
+        "साक्षात्कार पूरा करने के लिए धन्यवाद! आपके उत्तर रिकॉर्ड कर लिए गए हैं। आपका दिन शुभ हो!",
+      "ur-PK":
+        "انٹرویو مکمل کرنے کا شکریہ! آپ کے جوابات ریکارڈ کر لیے گئے ہیں۔ آپ کا دن اچھا گزرے!",
     };
     return {
       language: sysLang[langCode] || sysLang["en-US"],
       pleaseClickNext: pleaseClickNextPrompts[langCode] || pleaseClickNextPrompts["en-US"],
+      pleaseClickFinish: pleaseClickFinishPrompts[langCode] || pleaseClickFinishPrompts["en-US"],
       repeat: repeatPrompts[langCode] || repeatPrompts["en-US"],
       ending: endingPrompts[langCode] || endingPrompts["en-US"],
     };
@@ -431,7 +364,8 @@ export function useInterviewVapi({
 
   const buildSystemPrompt = useCallback(
     (langCode: string): string => {
-      const { language, pleaseClickNext, repeat, ending } = getLocalizedPrompts(langCode);
+      const { language, pleaseClickNext, pleaseClickFinish, repeat, ending } =
+        getLocalizedPrompts(langCode);
 
       return `You are an AI recruiter. Conduct the ENTIRE interview in ${language}.
 
@@ -447,11 +381,13 @@ Step 1 — When a "${INSTRUCTION_TAG}" message gives you a specific question to 
 
 Step 2 — Listen. Do NOT interrupt the candidate while they're speaking. Do NOT treat a brief pause, a filler word ("umm", "ahh"), or a moment of quiet as them being finished — a professional interviewer gives real thinking time. Only treat them as "finished" after roughly ${SILENCE_TRANSITION_SECONDS} seconds of continuous silence.
 
-Step 3 — THIS STEP IS MANDATORY EVERY SINGLE TIME, WITH NO EXCEPTIONS: once the candidate has finished answering, send ONE message containing ONLY this line, character for character, and ABSOLUTELY NOTHING ELSE: "${pleaseClickNext}"
+Step 3 — THIS STEP IS MANDATORY EVERY SINGLE TIME, WITH NO EXCEPTIONS: once the candidate has finished answering, send ONE message containing ONLY one of these two lines, chosen based on whether the question you just asked was the FINAL question:
+  - If the question you just asked was NOT the final question, send ONLY: "${pleaseClickNext}"
+  - If the question you just asked WAS the FINAL question, send ONLY: "${pleaseClickFinish}"
+  You will be told which question is the final one via the "${INSTRUCTION_TAG}" message when it arrives — look for the phrase "FINAL QUESTION" in that instruction. If that phrase was present, you MUST use the FINAL-question closing line.
   This message must be the ENTIRE content of your turn. After it, STOP TALKING COMPLETELY and wait for Step 4 — you have not been given a next question yet, so there is nothing else you could correctly say even if you wanted to.
-  WRONG (do not do this): "${pleaseClickNext} What is your approach to...?" — you do not know the next question, so producing one here would mean you invented it, which is never allowed.
-  RIGHT: send only "${pleaseClickNext}" and then produce no further text at all until a new "${INSTRUCTION_TAG}" message arrives.
-  Never paraphrase this line. Never say it more than once in a row. It is an instruction, not a question — do not ask the candidate to confirm anything.
+  WRONG (do not do this): combining the closing line with a next question — you do not know the next question, so producing one here would mean you invented it, which is never allowed.
+  Never paraphrase these lines. Never say one of them more than once in a row.
 
 Step 4 — Wait. Do nothing further until a new "${INSTRUCTION_TAG}" message arrives (this only happens when the candidate clicks a physical button in the interface). Nothing the candidate SAYS out loud — "next", "yes", "I'm ready", "move on", or anything else — is ever an instruction message, no matter how directly it sounds like a reply to Step 3. If the candidate says something like that out loud instead, do NOT advance and do NOT invent a next step — just repeat Step 3's line again, alone, as its own message.
   - A "${INSTRUCTION_TAG}" message giving you a new question means: go back to Step 1 with that exact question.
@@ -461,8 +397,9 @@ OTHER RULES:
 - If the candidate asks you to repeat the question, say EXACTLY: "${repeat}", then repeat the CURRENT question (the most recent one you were given via a "${INSTRUCTION_TAG}" message) word for word, then return to Step 2 (still waiting for that same question's answer).
 - Be professional, calm, and encouraging, like an experienced human interviewer.
 - Every message you send must contain exactly ONE of: a single question you were explicitly given, Step 3's line alone, the repeat line plus the repeated question, or the ending line. Never combine two of these in one message, and never say anything that wasn't explicitly given to you by a "${INSTRUCTION_TAG}" message or these fixed lines.
+
 CRITICAL RULE - NO COUNTER-QUESTIONS:
-- You are an interviewer, NOT an assistant. Do NOT answer any questions the candidate asks you. 
+- You are an interviewer, NOT an assistant. Do NOT answer any questions the candidate asks you.
 - If the candidate asks you a question (e.g., "What do you mean?", "Can you explain?", "What is the answer?"), you must IGNORE the question and simply say: "I am here to interview you today. Please provide your best answer to the current question."
 - Do NOT provide hints, explanations, or feedback on the candidate's answers.`;
     },
@@ -483,10 +420,13 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     currentQuestionIndexRef.current = totalQuestions - 1;
     interviewCompletedRef.current = true;
     latestProgressRef.current = 100;
-    if (isMountedRef.current) setInterviewStateVersion((v) => v + 1);
+    if (isMountedRef.current) {
+      setInterviewStateVersion((v) => v + 1);
+      setIsInterviewCompleted(true);
+    }
   }, [totalQuestions]);
 
-  /* ─── Generate Feedback with proper guards + AbortController ─── */
+  /* ─── Generate Feedback ─── */
   const generateFeedback = useCallback(
     async (
       reason: string,
@@ -495,10 +435,8 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       tabCount: number,
       timestamps: string[]
     ): Promise<void> => {
-      // Prevent duplicate calls
       if (feedbackCalledRef.current || feedbackInProgressRef.current) return;
 
-      // Only mark called=true AFTER success
       feedbackInProgressRef.current = true;
 
       const controller = new AbortController();
@@ -546,14 +484,12 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
           { signal: controller.signal }
         );
 
-        // Only mark as called AFTER both API calls succeed
         feedbackCalledRef.current = true;
 
         if (isMountedRef.current) {
           router.replace(`/interview/${interviewId}/completed`);
         }
       } catch (error: unknown) {
-        // Ignore abort errors
         if (axios.isCancel(error)) {
           console.log("Feedback request cancelled.");
           return;
@@ -561,7 +497,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
 
         console.error("Interview feedback generation failed:", error);
 
-        // Allow retry on failure
         feedbackCalledRef.current = false;
 
         if (isMountedRef.current) {
@@ -615,51 +550,29 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
         vapiInstance.start({
           name: "AI Recruiter",
           firstMessage: welcome,
-          // ✅ FIX: the model only ever sees a transcript once Vapi's own
-          // turn-taking layer decides the candidate is done talking — no
-          // amount of prompt wording can override that decision, since it
-          // happens upstream of the LLM. Without these, the transcriber's
-          // built-in end-of-turn detection (very fast, ~sub-second) can win
-          // and hand off to the model the instant the candidate pauses for
-          // a breath, regardless of what rules 3/6 in the system prompt say.
-          // See https://docs.vapi.ai/customization/voice-pipeline-configuration
           startSpeakingPlan: {
-            // Stopgap minimum pause before the assistant starts speaking at
-            // all (not the full patience window by itself).
             waitSeconds: RESPONSE_WAIT_SECONDS,
-            // LiveKit smart endpointing (English) maps "confidence the
-            // candidate is still talking" (x, 0-1) to a wait in ms. Low
-            // confidence (finished, punctuation, clear stop) -> short wait;
-            // high confidence (mid-thought, filler word, trailing off) ->
-            // wait close to our full SILENCE_TRANSITION_SECONDS budget.
             smartEndpointingPlan:
               languageCode === "en-US"
                 ? {
-                  provider: "livekit",
-                  waitFunction: `500 + ${(SILENCE_TRANSITION_SECONDS - 0.5) * 1000} * x`,
-                }
+                    provider: "livekit",
+                    waitFunction: `500 + ${(SILENCE_TRANSITION_SECONDS - 0.5) * 1000} * x`,
+                  }
                 : undefined,
-            // Fallback endpointing for non-English, where LiveKit smart
-            // endpointing isn't supported yet.
             transcriptionEndpointingPlan:
               languageCode !== "en-US"
                 ? {
-                  onPunctuationSeconds: 0.5,
-                  onNoPunctuationSeconds: SILENCE_TRANSITION_SECONDS,
-                  onNumberSeconds: 1,
-                }
+                    onPunctuationSeconds: 0.5,
+                    onNoPunctuationSeconds: SILENCE_TRANSITION_SECONDS,
+                    onNumberSeconds: 1,
+                  }
                 : undefined,
           },
           stopSpeakingPlan: {
-            // Require a couple of real words (not just a stray "umm") before
-            // the candidate's speech is treated as an interruption of the AI.
             numWords: 2,
             voiceSeconds: 0.4,
             backoffSeconds: 1.5,
           },
-          // Whole-call idle-hangup timeout. Must stay comfortably above
-          // SILENCE_TRANSITION_SECONDS, or Vapi could end the call while the
-          // candidate is still mid-thought on a single question.
           silenceTimeoutSeconds: CALL_IDLE_TIMEOUT_SECONDS,
           transcriber: {
             provider: "deepgram",
@@ -668,15 +581,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
               languageCode === "hi-IN" ? "hi"
                 : languageCode === "ur-PK" ? "ur"
                   : "en-US",
-            // Deepgram's own trailing-silence-before-finalizing setting
-            // (ms). Vapi's API enforces a hard server-side cap of 500ms
-            // here ("assistant.transcriber.endpointing must not be greater
-            // than 500") — confirmed by an actual 400 response, so this is
-            // NOT tunable up to match SILENCE_TRANSITION_SECONDS. The real
-            // patience budget lives entirely in startSpeakingPlan above;
-            // this field only affects how quickly Deepgram finalizes each
-            // individual transcript chunk, not when Vapi decides the
-            // candidate's turn is over.
             endpointing: 500,
           },
           voice: {
@@ -686,16 +590,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
           model: {
             provider: "openai",
             model: "gpt-4o-mini",
-            // ✅ Lower temperature (default is usually ~0.7-1.0) makes the
-            // model stick closer to the literal instruction ("send ONLY
-            // this one line and stop") instead of creatively continuing on
-            // into content nobody asked for yet — a real session showed the
-            // model appending the next interview question directly after
-            // the click-next line in the SAME message, before any click had
-            // happened. This won't eliminate that on its own (see the
-            // strengthened Step 3 wording above), but combined with the
-            // prompt fix it meaningfully reduces the model's tendency to
-            // keep talking past the one required sentence.
             temperature: 0.3,
             messages: [{ role: "system", content: buildSystemPrompt(languageCode) }],
           },
@@ -709,23 +603,12 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     [interviewInfo, config.voiceId, totalQuestions, getLanguageCode, buildSystemPrompt]
   );
 
-  /* ─── Vapi setup ───
-     ✅ FIX (critical): `hasInterviewStarted` has been REMOVED from this
-     effect's dependency array and from its early-return guard. It used to
-     be both set inside this effect (in the call-start handler) and listed
-     as a dependency, which forced React to tear down (cleanup: vapi.stop())
-     and re-run this effect the instant the call actually connected — killing
-     the interview immediately after it started. Gating is now done purely
-     with `setupStartedRef`, a ref that isn't part of the dependency array,
-     so state changes produced by the effect itself can no longer re-trigger
-     it. */
+  /* ─── Vapi setup ─── */
   useEffect(() => {
     if (!interviewInfo) return;
     if (!isPreCheckComplete) return;
     if (!isConfigLoaded) return;
     if (totalQuestions === 0) return;
-
-    // Prevent duplicate setup (StrictMode double-invoke, re-renders, etc.)
     if (setupStartedRef.current) return;
     if (vapiRef.current) return;
 
@@ -747,7 +630,11 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     autoEndTriggeredRef.current = false;
     firstQuestionSentRef.current = false;
     candidateSpokeSinceQuestionRef.current = false;
-    if (isMountedRef.current) setCanAdvance(false);
+    if (isMountedRef.current) {
+      setCanAdvance(false);
+      setIsInterviewCompleted(false);
+      setHasQuestionBeenAsked(false);
+    }
     feedbackCalledRef.current = false;
     feedbackInProgressRef.current = false;
     hasGreetedRef.current = false;
@@ -773,7 +660,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       isCallActiveRef.current = true;
       if (isMountedRef.current) {
         setActiveUser(true);
-        setHasInterviewStarted(true); // UI flag only — safe now, not a dependency
+        setHasInterviewStarted(true);
       }
     });
 
@@ -796,8 +683,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       }
     });
 
-    /* ─── First question delivery + silence detection (UI-only) +
-       auto-end after final message ─── */
+    /* ─── SPEECH END ─── */
     vapi.on("speech-end", () => {
       if (destroyed) return;
 
@@ -807,19 +693,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
         setAiIsSpeaking(false);
       }
 
-      // ✅ FIX: previously this was sent from the "call-start" handler, the
-      // instant the call connected. A real session got stuck after only the
-      // fixed greeting ("Hi, {name}!") played and then went silent — Vapi's
-      // default firstMessageMode ('assistant-speaks-first') plays that
-      // greeting as a fixed, non-LLM string, so sending our instruction that
-      // early can race the data channel/TTS pipeline actually being ready to
-      // accept and act on it. This first "speech-end" reliably marks the
-      // moment that fixed greeting has finished playing — both the call and
-      // the pipeline are unambiguously ready by then, so this is a safer,
-      // later point to hand over question 1. Guarded by firstQuestionSentRef
-      // so it only ever fires once per call, and it's intentionally checked
-      // BEFORE the auto-end/completion check below, since they're mutually
-      // exclusive events within a single call.
+      // First question delivery — fires exactly once, right after the greeting
       if (!firstQuestionSentRef.current && questions.length > 0) {
         firstQuestionSentRef.current = true;
         setCandidateSpoke(false);
@@ -828,33 +702,26 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
             type: "add-message",
             message: {
               role: "user",
-              content: buildAskQuestionInstruction(questions[0].question),
+              content: buildAskQuestionInstruction(
+                questions[0].question,
+                totalQuestions === 1
+              ),
             },
           });
+          // Mark as asked only after we've actually sent it
+          if (isMountedRef.current) setHasQuestionBeenAsked(true);
         } catch (error) {
           console.error("Failed to send first question instruction:", error);
         }
       }
 
-      // ✅ FIX: previously the call just stayed "live" forever after the
-      // model spoke its ending line — the session only ended when the
-      // person manually clicked "End Session". `speech-end` here fires
-      // once the ASSISTANT finishes speaking (see `aiIsSpeaking` above),
-      // so the first time this fires after `interviewCompletedRef` has
-      // been set (which only happens once, in markInterviewCompleted(),
-      // triggered by clicking "Next Question" on the LAST question) is
-      // reliably the moment the ending line's audio has finished playing.
-      // `autoEndTriggeredRef` ensures this only runs once even if further
-      // speech-end events fire for any reason after completion.
+      // Auto-end after the AI speaks the final ending line
       if (interviewCompletedRef.current && !autoEndTriggeredRef.current) {
         autoEndTriggeredRef.current = true;
         setTimeout(() => {
           if (destroyed || !isMountedRef.current) return;
           if (!isCallActiveRef.current) return;
           try {
-            // Intentional stop, not a cleanup teardown — isCleaningUpRef
-            // stays false so call-end's normal feedback-generation path
-            // runs, exactly as if the person had clicked "End Session".
             vapi.stop();
           } catch (error) {
             console.error("Failed to auto-stop call after final message:", error);
@@ -867,7 +734,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
               switchTimestampsRef.current
             );
           }
-        }, 1500); // small buffer so the tail of the TTS audio isn't cut off
+        }, 1500);
       }
 
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
@@ -883,7 +750,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       }, CANDIDATE_SILENCE_MS);
     });
 
-    /* ─── VOLUME (UI only) ─── */
+    /* ─── VOLUME ─── */
     vapi.on("volume-level", (level: number) => {
       if (destroyed) return;
       if (isMountedRef.current) {
@@ -896,7 +763,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     vapi.on("message", (message: VapiMessage) => {
       if (destroyed) return;
 
-      // Handle newer transcript events
       if (
         message.type === "transcript" &&
         typeof message.transcript === "string" &&
@@ -908,7 +774,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
           setCandidateSpoke(true);
         }
       }
-      // Handle conversation updates
+
       if (message.conversation) {
         updateConversation(message.conversation);
 
@@ -934,7 +800,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       }
     });
 
-    /* ─── CALL END with proper guards ─── */
+    /* ─── CALL END ─── */
     vapi.on("call-end", () => {
       if (destroyed) return;
 
@@ -948,13 +814,11 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
         setVolume(0);
       }
 
-      // Skip feedback if cleanup triggered this
       if (isCleaningUpRef.current) {
         console.log("Ignoring cleanup-triggered call-end");
         return;
       }
 
-      // Use explicit completion flag
       const completed = interviewCompletedRef.current;
       const progress = completed ? 100 : Math.min(latestProgressRef.current, 100);
       const reason = completed ? "Interview Completed Normally" : "User Ended Early";
@@ -1008,7 +872,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
       setupStartedRef.current = false;
       clearTimers();
 
-      // Cancel in-flight feedback
       if (feedbackAbortRef.current) {
         feedbackAbortRef.current.abort();
         feedbackAbortRef.current = null;
@@ -1020,21 +883,6 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
         console.error("Failed to remove Vapi listeners:", error);
       }
 
-      // ✅ FIX (critical): guard on `callStartedRef`, not `isCallActiveRef`.
-      // `isCallActiveRef` only flips to true once the "call-start" event
-      // fires — i.e. AFTER the Daily/Vapi room has finished connecting.
-      // `vapi.start()` kicks off room creation synchronously, well before
-      // that event arrives. If this effect tears down before "call-start"
-      // fires (StrictMode's dev-only mount→cleanup→remount is the most
-      // common trigger, but any re-render with a new dependency reference
-      // would do the same), the old `isCallActiveRef.current` check was
-      // still false, so the in-flight call was abandoned instead of
-      // stopped. The backend later kills that orphaned room, and the
-      // resulting "no-room" / "room was deleted" error was observed
-      // leaking into the NEXT (live) instance's error handler — which is
-      // exactly the "Real Vapi error" / stuck-at-0%-progress symptom.
-      // `callStartedRef` is set synchronously the moment start() is
-      // called, so this now always attempts to stop anything we started.
       if (callStartedRef.current) {
         try {
           vapi.stop();
@@ -1057,6 +905,7 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     clearTimers,
     updateConversation,
     buildAskQuestionInstruction,
+    setCandidateSpoke,
   ]);
 
   /* ─── Handle "repeat" ─── */
@@ -1069,7 +918,8 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
         type: "add-message",
         message: {
           role: "user",
-          content: "Please repeat the current interview question exactly. Do not move to the next question.",
+          content:
+            "Please repeat the current interview question exactly. Do not move to the next question.",
         },
       });
       toast.success("Repeating question...");
@@ -1079,57 +929,70 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     }
   }, []);
 
-  /* ─── Handle "next" — updates explicit state ─── */
-  // In useInterviewVapi.ts -> handleNextQuestion
-
+  /* ─── Handle "next" / "finish" ─── */
   const handleNextQuestion = useCallback(() => {
     const vapi = vapiRef.current;
     if (!vapi || !isCallActiveRef.current) return;
 
-    const isLastQuestion = currentQuestionIndexRef.current >= totalQuestions - 1;
-
-    // ✅ FIX: If it's the last question, we don't need to check if they spoke.
-    // They must have spoken to get here, or they are clicking to finish.
-    if (!isLastQuestion && !candidateSpokeSinceQuestionRef.current) {
+    // Require an actual answer before advancing
+    if (!candidateSpokeSinceQuestionRef.current) {
       toast.error("Please answer the current question before moving on.");
       return;
     }
 
-    // Explicitly track progress
-    if (isLastQuestion) {
+    const isAnsweringLastQuestion =
+      currentQuestionIndexRef.current >= totalQuestions - 1;
+
+    if (isAnsweringLastQuestion) {
+      // User has answered the LAST question and clicked "Finish Interview"
       markInterviewCompleted();
-      // ✅ FIX: Keep canAdvance true so the button doesn't gray out
-      // We allow the click to process the completion.
-      setCandidateSpoke(true);
-    } else {
-      answeredQuestionsRef.current = Math.min(
-        answeredQuestionsRef.current + 1,
-        totalQuestions
-      );
-      currentQuestionIndexRef.current = Math.min(
-        currentQuestionIndexRef.current + 1,
-        totalQuestions - 1
-      );
-      // Trigger re-render
-      if (isMountedRef.current) setInterviewStateVersion((v) => v + 1);
-      // Reset for the next question
       setCandidateSpoke(false);
+
+      try {
+        const { ending } = getLocalizedPrompts(getLanguageCode());
+        vapi.send({
+          type: "add-message",
+          message: {
+            role: "user",
+            content: buildCompleteInstruction(ending),
+          },
+        });
+        toast.success("Finishing interview...");
+      } catch (error) {
+        console.error("Failed to finish interview:", error);
+        toast.error("Failed to finish interview.");
+      }
+      return;
     }
 
+    // Advance to the next question
+    answeredQuestionsRef.current = Math.min(
+      answeredQuestionsRef.current + 1,
+      totalQuestions
+    );
+    currentQuestionIndexRef.current = Math.min(
+      currentQuestionIndexRef.current + 1,
+      totalQuestions - 1
+    );
+    if (isMountedRef.current) setInterviewStateVersion((v) => v + 1);
+
+    setCandidateSpoke(false);
+
     try {
-      const { ending } = getLocalizedPrompts(getLanguageCode());
-      const content = isLastQuestion
-        ? buildCompleteInstruction(ending)
-        : buildAskQuestionInstruction(questions[currentQuestionIndexRef.current].question);
+      const nextIndex = currentQuestionIndexRef.current;
+      const isNextFinal = nextIndex >= totalQuestions - 1;
 
       vapi.send({
         type: "add-message",
         message: {
           role: "user",
-          content,
+          content: buildAskQuestionInstruction(
+            questions[nextIndex].question,
+            isNextFinal
+          ),
         },
       });
-      toast.success(isLastQuestion ? "Finishing interview..." : "Moving to next question...");
+      toast.success("Moving to next question...");
     } catch (error) {
       console.error("Failed to move to next question:", error);
       toast.error("Failed to skip question.");
@@ -1144,13 +1007,13 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     questions,
     setCandidateSpoke,
   ]);
+
   /* ─── Stop interview ─── */
   const handleStop = useCallback(() => {
     const vapi = vapiRef.current;
     if (!vapi || !isCallActiveRef.current) return;
 
     try {
-      // Do NOT set isCleaningUpRef — this is an intentional stop
       vapi.stop();
     } catch (error) {
       console.error("Failed to stop interview:", error);
@@ -1180,14 +1043,10 @@ CRITICAL RULE - NO COUNTER-QUESTIONS:
     totalQuestions,
     conversation,
     hasInterviewStarted,
-    // ✅ True once the candidate has said something for the CURRENT
-    // question; false again the instant a new question is delivered. The
-    // "Next Question" button should be disabled whenever this is false —
-    // NOT based on comparing currentQuestionIndex to totalQuestions, which
-    // incorrectly disables the button on the last question and blocks the
-    // one click that's supposed to complete the interview.
     canAdvance,
-    isLastQuestion: currentQuestionIndex >= totalQuestions - 1, // 👈 ADD THIS
+    isLastQuestion,
+    isInterviewCompleted,
+    hasQuestionBeenAsked,   // ✅ new — UI uses this to avoid showing "Q1/6" on arrival
     handleRepeatQuestion,
     handleNextQuestion,
     handleStop,
